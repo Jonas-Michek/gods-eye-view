@@ -307,7 +307,9 @@ export class DataLayerManager {
     let result;
     let failure = null;
     try {
-      result = await entry.module.update(this.viewer, { signal });
+      result = typeof entry.module.update === 'function'
+        ? await entry.module.update(this.viewer, { signal })
+        : true;
       // Poll-tick entity refreshes don't auto-render in idle mode. Fires on
       // any non-throwing update — a rejected/partial refresh may still have
       // mutated scene state. (perf wave 2; moved into _runPeriodicUpdate
@@ -905,7 +907,9 @@ export class DataLayerManager {
       // First update immediately
       this._setVisibilityIntentPhase(entry, intentEpoch, 'update');
       try {
-        const updated = await entry.module.update(this.viewer, { signal });
+        const updated = typeof entry.module.update === 'function'
+          ? await entry.module.update(this.viewer, { signal })
+          : true;
         if (updated === false) throw lifecycleRejectedError(layerId, 'update');
       } catch (e) {
         if (signal?.aborted || isAbortError(e)) {

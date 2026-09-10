@@ -15,6 +15,7 @@ const GLOBAL_CONTEXT_EXPLICIT_ACTIONS = new Set([
   'contacts',
   'space-missions',
   'cockpit',
+  'pid',
 ]);
 
 /**

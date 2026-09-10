@@ -1,6 +1,7 @@
 const CONTEXT_DEPENDENCIES = Object.freeze({
   flights: new Set(['military-awareness', 'flights', 'military', 'ais-live-vessels', 'military-installations']),
   'space-missions': new Set(['rocket-launches', 'satellites']),
+  pid: new Set(['pid-transit']),
 });
 const CONTEXT_COMPANIONS = new Set(['radio']);
 /** Return whether an origin represents a direct user choice on this route. */
@@ -83,7 +84,7 @@ export async function settleUserFacingContextAction({ operation, onFailure, fals
  * one into `userAdded` makes exit restoration re-enable the mode layer the
  * user just turned off.
  */
-export const CONTEXT_ENTRY_LAYER_IDS = Object.freeze(['military-awareness', 'rocket-launches']);
+export const CONTEXT_ENTRY_LAYER_IDS = Object.freeze(['military-awareness', 'rocket-launches', 'pid-transit']);
 
 /**
  * Leave a Context transaction: publish the settled coordination flag, then
@@ -366,6 +367,7 @@ export function cockpitEntryAllowed({
 export const CONTEXT_MODE_VOICE_NAMES = Object.freeze({
   flights: 'contacts',
   'space-missions': 'space-missions',
+  pid: 'pid',
 });
 
 /**

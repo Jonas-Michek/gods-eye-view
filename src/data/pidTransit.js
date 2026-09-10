@@ -95,6 +95,9 @@ const ICONS = {
   poi: createPoiIcon(),
 };
 
+/** Prague baseline ground elevation in meters above WGS84 ellipsoid */
+const PRAGUE_SURFACE_ALT = 215.0;
+
 // --- State Variables ---
 let _viewer = null;
 let _enabled = false;
@@ -104,6 +107,7 @@ let _lastUpdate = null;
 let _error = null;
 
 let _polylineCollection = null;
+let _trackEntities = [];
 let _billboardCollection = null;
 let _laserPolyline = null;
 
@@ -310,22 +314,37 @@ function updateFleetMotion(dtSec = 0.05) {
   }
 }
 
+function getGolemioToken() {
+  const envToken = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GOLEMIO_API_KEY)
+    || (typeof process !== 'undefined' && (process.env?.VITE_GOLEMIO_API_KEY || process.env?.GOLEMIO_API_KEY))
+    || null;
+  const storageToken = typeof localStorage !== 'undefined' ? localStorage.getItem('gev:golemio-key') : null;
+  return envToken || storageToken || null;
+}
+
 /**
  * Fetch live vehicle positions from Golemio API if token is present
  */
-async function fetchGolemioPositions(token) {
+async function fetchGolemioPositions(token, { signal = null } = {}) {
   if (!token) return false;
   try {
     const url = 'https://api.golemio.cz/v2/vehiclepositions';
     const resp = await fetch(url, {
+      signal,
       headers: {
         'x-access-token': token,
         Accept: 'application/json',
       },
     });
-    if (!resp.ok) return false;
+    if (!resp.ok) {
+      _error = `Golemio HTTP ${resp.status}`;
+      return false;
+    }
     const data = await resp.json();
-    if (!data || !Array.isArray(data.features)) return false;
+    if (!data || !Array.isArray(data.features)) {
+      _error = 'Malformed Golemio response';
+      return false;
+    }
 
     // Merge Golemio features into live vehicles
     const pragueFeatures = data.features.filter((f) => {
@@ -348,6 +367,7 @@ async function fetchGolemioPositions(token) {
       return true;
     }
   } catch (err) {
+    if (signal?.aborted || err?.name === 'AbortError') throw err;
     console.warn('[PID Transit] Golemio fetch error:', err);
   }
   return false;
@@ -357,60 +377,104 @@ async function fetchGolemioPositions(token) {
  * Render static railway, metro and tram corridors as glowing 3D polyline primitives
  */
 function buildStaticTrackPolylines(viewer) {
+  if (_trackEntities.length > 0 && viewer?.entities?.remove) {
+    for (const ent of _trackEntities) {
+      viewer.entities.remove(ent);
+    }
+    _trackEntities = [];
+  }
   if (_polylineCollection) {
-    viewer.scene.primitives.remove(_polylineCollection);
+    viewer?.scene?.primitives?.remove?.(_polylineCollection);
     _polylineCollection = null;
   }
 
-  const polylines = viewer.scene.primitives.add(new Cesium.PolylineCollection());
-
-  // 1. Metro lines (in 3D tunnel depths)
-  Object.entries(METRO_LINES).forEach(([key, line]) => {
-    const positions = line.stations.map((s) => {
-      // Subsurface depth: offset altitude downwards
-      const depthM = s.depth ? -s.depth : 0;
-      return Cesium.Cartesian3.fromDegrees(s.lon, s.lat, depthM);
+  if (viewer?.entities?.add) {
+    // 1. Metro lines (visible on surface, with depthFailMaterial to shine through 3D buildings)
+    Object.entries(METRO_LINES).forEach(([key, line]) => {
+      const positions = line.stations.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 3.0));
+      const ent = viewer.entities.add({
+        id: `pid-track-metro-${key}`,
+        polyline: {
+          positions,
+          width: 5.5,
+          material: Cesium.Color.fromCssColorString(line.color).withAlpha(0.95),
+          depthFailMaterial: Cesium.Color.fromCssColorString(line.color).withAlpha(0.75),
+          arcType: Cesium.ArcType ? Cesium.ArcType.GEODESIC : undefined,
+        },
+      });
+      _trackEntities.push(ent);
     });
 
-    polylines.add({
-      positions,
-      width: 5.0,
-      material: Cesium.Material.fromType('Color', {
-        color: Cesium.Color.fromCssColorString(line.color).withAlpha(0.92),
-      }),
-      id: `pid-track-metro-${key}`,
+    // 2. Tram corridors
+    TRAM_LINES.forEach((tram) => {
+      const positions = tram.stops.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0));
+      const ent = viewer.entities.add({
+        id: `pid-track-tram-${tram.line}`,
+        polyline: {
+          positions,
+          width: 3.5,
+          material: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
+          depthFailMaterial: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.6),
+          arcType: Cesium.ArcType ? Cesium.ArcType.GEODESIC : undefined,
+        },
+      });
+      _trackEntities.push(ent);
     });
-  });
 
-  // 2. Tram corridors
-  TRAM_LINES.forEach((tram) => {
-    const positions = tram.stops.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 2.0));
-    polylines.add({
-      positions,
-      width: 3.5,
-      material: Cesium.Material.fromType('Color', {
-        color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
-      }),
-      id: `pid-track-tram-${tram.line}`,
+    // 3. Ferries
+    FERRIES.forEach((ferry) => {
+      const positions = [
+        Cesium.Cartesian3.fromDegrees(ferry.start.lon, ferry.start.lat, 185.0),
+        Cesium.Cartesian3.fromDegrees(ferry.end.lon, ferry.end.lat, 185.0),
+      ];
+      const ent = viewer.entities.add({
+        id: `pid-ferry-line-${ferry.id}`,
+        polyline: {
+          positions,
+          width: 2.5,
+          material: Cesium.Color.fromCssColorString(FERRY_COLOR).withAlpha(0.8),
+          depthFailMaterial: Cesium.Color.fromCssColorString(FERRY_COLOR).withAlpha(0.5),
+        },
+      });
+      _trackEntities.push(ent);
     });
-  });
-
-  // 3. Ferries
-  FERRIES.forEach((ferry) => {
-    polylines.add({
-      positions: [
-        Cesium.Cartesian3.fromDegrees(ferry.start.lon, ferry.start.lat, 1.0),
-        Cesium.Cartesian3.fromDegrees(ferry.end.lon, ferry.end.lat, 1.0),
-      ],
-      width: 2.5,
-      material: Cesium.Material.fromType('Color', {
-        color: Cesium.Color.fromCssColorString(FERRY_COLOR).withAlpha(0.75),
-      }),
-      id: `pid-ferry-line-${ferry.id}`,
+  } else if (viewer?.scene?.primitives?.add) {
+    const polylines = viewer.scene.primitives.add(new Cesium.PolylineCollection());
+    Object.entries(METRO_LINES).forEach(([key, line]) => {
+      polylines.add({
+        positions: line.stations.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 3.0)),
+        width: 5.0,
+        material: Cesium.Material.fromType('Color', {
+          color: Cesium.Color.fromCssColorString(line.color).withAlpha(0.92),
+        }),
+        id: `pid-track-metro-${key}`,
+      });
     });
-  });
-
-  _polylineCollection = polylines;
+    TRAM_LINES.forEach((tram) => {
+      polylines.add({
+        positions: tram.stops.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0)),
+        width: 3.5,
+        material: Cesium.Material.fromType('Color', {
+          color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
+        }),
+        id: `pid-track-tram-${tram.line}`,
+      });
+    });
+    FERRIES.forEach((ferry) => {
+      polylines.add({
+        positions: [
+          Cesium.Cartesian3.fromDegrees(ferry.start.lon, ferry.start.lat, 185.0),
+          Cesium.Cartesian3.fromDegrees(ferry.end.lon, ferry.end.lat, 185.0),
+        ],
+        width: 2.5,
+        material: Cesium.Material.fromType('Color', {
+          color: Cesium.Color.fromCssColorString(FERRY_COLOR).withAlpha(0.75),
+        }),
+        id: `pid-ferry-line-${ferry.id}`,
+      });
+    });
+    _polylineCollection = polylines;
+  }
 }
 
 /**
@@ -418,21 +482,26 @@ function buildStaticTrackPolylines(viewer) {
  */
 function buildBillboardCollections(viewer) {
   if (_billboardCollection) {
-    viewer.scene.primitives.remove(_billboardCollection);
+    viewer?.scene?.primitives?.remove?.(_billboardCollection);
     _billboardCollection = null;
   }
+  if (!viewer?.scene?.primitives?.add) return;
 
-  const billboards = viewer.scene.primitives.add(new Cesium.BillboardCollection());
+  const billboards = viewer.scene.primitives.add(new Cesium.BillboardCollection({
+    scene: viewer?.scene,
+    blendOption: Cesium.BlendOption ? Cesium.BlendOption.TRANSLUCENT : undefined,
+  }));
   registerSpriteCollection('pid-transit', billboards);
 
-  // Metro station markers
+  // Metro station markers (always on top via disableDepthTestDistance, at surface elevation)
   METRO_STATIONS.forEach((station) => {
     const iconKey = `metro${station.line}`;
     billboards.add({
-      position: Cesium.Cartesian3.fromDegrees(station.lon, station.lat, (station.depth ? -station.depth : 0) + 1.0),
+      position: Cesium.Cartesian3.fromDegrees(station.lon, station.lat, PRAGUE_SURFACE_ALT + 5.0),
       image: ICONS[iconKey] || ICONS.metroA,
       width: 24,
       height: 24,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
       scaleByDistance: new Cesium.NearFarScalar(500, 1.0, 40000, 0.4),
       id: `pid-station-${station.id}`,
     });
@@ -441,16 +510,17 @@ function buildBillboardCollections(viewer) {
   // Prague POI markers
   PRAGUE_POIS.forEach((poi) => {
     billboards.add({
-      position: Cesium.Cartesian3.fromDegrees(poi.lon, poi.lat, 15.0),
+      position: Cesium.Cartesian3.fromDegrees(poi.lon, poi.lat, PRAGUE_SURFACE_ALT + 6.0),
       image: ICONS.poi,
       width: 26,
       height: 26,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
       scaleByDistance: new Cesium.NearFarScalar(500, 1.1, 50000, 0.5),
       id: `pid-poi-${poi.id}`,
     });
   });
 
-  // Live Vehicle Billboards (one per vehicle in fleet)
+  // Live Vehicle Billboards (always visible & pickable on top of 3D tiles)
   _vehicles.forEach((v) => {
     let icon = ICONS.bus;
     if (v.type === 'metro') {
@@ -461,12 +531,12 @@ function buildBillboardCollections(viewer) {
       icon = ICONS.ferry;
     }
 
-    const altitude = v.type === 'metro' ? -(v.depth || 15) : 3.0;
     const bb = billboards.add({
-      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, altitude),
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, PRAGUE_SURFACE_ALT + 5.0),
       image: icon,
       width: 28,
       height: 28,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
       scaleByDistance: new Cesium.NearFarScalar(300, 1.2, 35000, 0.5),
       id: v.id,
     });
@@ -488,6 +558,19 @@ function applyFilter() {
         v.billboard.show = (v.type === 'metro');
       } else if (_filter === 'tram') {
         v.billboard.show = (v.type === 'tram');
+      }
+    }
+  }
+
+  for (const ent of _trackEntities) {
+    if (!ent || !ent.id) continue;
+    if (typeof ent.id === 'string') {
+      if (ent.id.startsWith('pid-track-metro-')) {
+        ent.show = (_filter === 'all' || _filter === 'metro');
+      } else if (ent.id.startsWith('pid-track-tram-')) {
+        ent.show = (_filter === 'all' || _filter === 'tram');
+      } else if (ent.id.startsWith('pid-ferry-')) {
+        ent.show = (_filter === 'all');
       }
     }
   }
@@ -527,6 +610,7 @@ function applyFilter() {
  * Animation loop for dead-reckoning movement
  */
 function startAnimationLoop(viewer) {
+  if (typeof requestAnimationFrame !== 'function') return;
   let lastTime = performance.now();
 
   function onFrame(now) {
@@ -537,11 +621,10 @@ function startAnimationLoop(viewer) {
     // Step physics / track progress
     updateFleetMotion(dt);
 
-    // Update Cesium billboards
+    // Update Cesium billboards on surface
     for (const v of _vehicles) {
       if (!v.billboard) continue;
-      const alt = v.type === 'metro' ? -(v.depth || 15) : 3.0;
-      v.billboard.position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, alt);
+      v.billboard.position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, PRAGUE_SURFACE_ALT + 5.0);
     }
 
     // If a vehicle is currently tracked in Cockpit View, sync camera
@@ -557,19 +640,40 @@ function startAnimationLoop(viewer) {
 }
 
 /**
- * First-person / Chase Cockpit Camera locked to vehicle
+ * Overhead tracking camera locked above vehicle (Nad zemí ze shora)
  */
 function updateCockpitCamera(viewer, vehicle) {
   if (!viewer || !vehicle) return;
   const headingRad = Cesium.Math.toRadians(vehicle.bearing || 0);
-  const pitchRad = Cesium.Math.toRadians(vehicle.type === 'metro' ? -5 : -12);
-  const rangeM = vehicle.type === 'metro' ? 12 : 25;
 
+  // Surface elevation resolver: query scene height or globe height or fallback to Prague terrain MSL
+  let groundAlt = 240;
+  try {
+    const carto = Cesium.Cartographic.fromDegrees(vehicle.lon, vehicle.lat);
+    if (viewer.scene?.sampleHeightSupported && typeof viewer.scene.sampleHeight === 'function') {
+      const sampled = viewer.scene.sampleHeight(carto);
+      if (Number.isFinite(sampled) && sampled > 50) groundAlt = sampled;
+    } else if (viewer.scene?.globe && typeof viewer.scene.globe.getHeight === 'function') {
+      const sampled = viewer.scene.globe.getHeight(carto);
+      if (Number.isFinite(sampled) && sampled > 50) groundAlt = sampled;
+    }
+  } catch {
+    // Safe fallback
+  }
+
+  // Above ground target: right on the surface
   const targetCartesian = Cesium.Cartesian3.fromDegrees(
     vehicle.lon,
     vehicle.lat,
-    vehicle.type === 'metro' ? -(vehicle.depth || 15) + 3 : 5.0,
+    groundAlt + 4.0,
   );
+
+  // For Metro (and transit vehicles in general):
+  // Position the camera above ground looking down from above (ze shora),
+  // giving an expansive overhead 3D view of the city surface, buildings, and streets.
+  const isMetro = vehicle.type === 'metro';
+  const pitchRad = Cesium.Math.toRadians(isMetro ? -45 : -28);
+  const rangeM = isMetro ? 240 : 130;
 
   viewer.camera.lookAt(
     targetCartesian,
@@ -587,8 +691,8 @@ function drawTransitLaser(viewer, poi) {
   }
   if (!poi || !poi.nearestStopCoords) return;
 
-  const start = Cesium.Cartesian3.fromDegrees(poi.lon, poi.lat, 20.0);
-  const end = Cesium.Cartesian3.fromDegrees(poi.nearestStopCoords.lon, poi.nearestStopCoords.lat, 5.0);
+  const start = Cesium.Cartesian3.fromDegrees(poi.lon, poi.lat, PRAGUE_SURFACE_ALT + 20.0);
+  const end = Cesium.Cartesian3.fromDegrees(poi.nearestStopCoords.lon, poi.nearestStopCoords.lat, PRAGUE_SURFACE_ALT + 5.0);
 
   const polylineCollection = viewer.scene.primitives.add(new Cesium.PolylineCollection());
   polylineCollection.add({
@@ -603,9 +707,10 @@ function drawTransitLaser(viewer, poi) {
 }
 
 /**
- * Handle pick / click on vehicles or POIs
+ * Handle pick / click on vehicles, stations, or POIs
  */
 function setupClickHandling(viewer) {
+  if (!viewer?.scene?.canvas || typeof Cesium?.ScreenSpaceEventHandler !== 'function') return;
   _clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
 
   _clickHandler.setInputAction((movement) => {
@@ -619,6 +724,13 @@ function setupClickHandling(viewer) {
         _selectedVehicle = v;
         window.dispatchEvent(new CustomEvent('gev:pid-vehicle-selected', { detail: v }));
         console.info(`[PID Transit] Selected vehicle: ${v.lineName} -> ${v.direction}`);
+      }
+    } else if (id.startsWith('pid-station-')) {
+      const stId = id.replace('pid-station-', '');
+      const station = METRO_STATIONS.find((s) => s.id === stId);
+      if (station) {
+        window.dispatchEvent(new CustomEvent('gev:pid-station-selected', { detail: station }));
+        console.info(`[PID Transit] Selected station: ${station.name} (${station.line})`);
       }
     } else if (id.startsWith('pid-poi-')) {
       const poiId = id.replace('pid-poi-', '');
@@ -637,6 +749,7 @@ function setupClickHandling(viewer) {
         _trackedCameraActive = false;
         viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
         if (_rowControlsListener) _rowControlsListener();
+        window.dispatchEvent(new CustomEvent('gev:pid-cockpit-changed', { detail: { active: false } }));
       }
       if (_laserPolyline) {
         viewer.scene.primitives.remove(_laserPolyline);
@@ -655,6 +768,7 @@ export const pidTransitLayer = {
   name: 'Prague Transit (PID)',
   icon: '🚊',
   source: 'PID & Golemio Open Data',
+  updateInterval: 15000,
 
   async init(viewer) {
     _viewer = viewer;
@@ -667,17 +781,7 @@ export const pidTransitLayer = {
     _enabled = true;
     _loading = true;
 
-    // 1. Enable subsurface translucency so underground metro tunnels are visible
-    try {
-      if (viewer.scene.globe) {
-        viewer.scene.globe.translucency.enabled = true;
-        viewer.scene.globe.translucency.frontFaceAlphaByDistance = new Cesium.NearFarScalar(1000, 0.4, 40000, 1.0);
-      }
-    } catch {
-      // Ignore if globe doesn't support translucency in current stack
-    }
-
-    // 2. Register pick ownership
+    // 1. Register pick ownership
     registerPickOwner('pid-transit', (pickedId) => {
       return typeof pickedId === 'string' && pickedId.startsWith('pid-');
     });
@@ -697,19 +801,6 @@ export const pidTransitLayer = {
     if (_showRadar) {
       showPragueGuide();
     }
-
-    // 4. Poll live data if token is provided
-    const token = import.meta.env.VITE_GOLEMIO_API_KEY || localStorage.getItem('gev:golemio-key');
-    if (token) {
-      await fetchGolemioPositions(token);
-    }
-
-    _pollTimer = setInterval(async () => {
-      const liveToken = import.meta.env.VITE_GOLEMIO_API_KEY || localStorage.getItem('gev:golemio-key');
-      if (liveToken) {
-        await fetchGolemioPositions(liveToken);
-      }
-    }, 15000);
 
     _loading = false;
     _lastUpdate = Date.now();
@@ -739,25 +830,24 @@ export const pidTransitLayer = {
 
     if (_trackedCameraActive) {
       _trackedCameraActive = false;
-      viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+      viewer?.camera?.lookAtTransform?.(Cesium.Matrix4.IDENTITY);
     }
 
     if (_polylineCollection) {
-      viewer.scene.primitives.remove(_polylineCollection);
+      viewer?.scene?.primitives?.remove?.(_polylineCollection);
       _polylineCollection = null;
     }
     if (_billboardCollection) {
-      viewer.scene.primitives.remove(_billboardCollection);
+      viewer?.scene?.primitives?.remove?.(_billboardCollection);
       _billboardCollection = null;
     }
     if (_laserPolyline) {
-      viewer.scene.primitives.remove(_laserPolyline);
+      viewer?.scene?.primitives?.remove?.(_laserPolyline);
       _laserPolyline = null;
     }
-
-    // Revert globe translucency
-    if (viewer.scene.globe) {
-      viewer.scene.globe.translucency.enabled = false;
+    if (_trackEntities && _trackEntities.length > 0) {
+      _trackEntities.forEach((ent) => viewer?.entities?.remove?.(ent));
+      _trackEntities = [];
     }
 
     unregisterPickOwner('pid-transit');
@@ -765,14 +855,25 @@ export const pidTransitLayer = {
     return true;
   },
 
-  async refresh(viewer) {
-    if (!_enabled) return false;
-    const token = import.meta.env.VITE_GOLEMIO_API_KEY || localStorage.getItem('gev:golemio-key');
+  async update(viewer, { signal = null } = {}) {
+    if (!_enabled) return true;
+    if (viewer) _viewer = viewer;
+    const token = getGolemioToken();
     if (token) {
-      return await fetchGolemioPositions(token);
+      try {
+        await fetchGolemioPositions(token, { signal });
+      } catch (err) {
+        if (signal?.aborted || err?.name === 'AbortError') throw err;
+        console.warn('[PID Transit] Golemio update error:', err);
+      }
     }
     _lastUpdate = Date.now();
+    governorRequestRender();
     return true;
+  },
+
+  async refresh(viewer) {
+    return this.update(viewer);
   },
 
   destroy(viewer) {
@@ -782,11 +883,14 @@ export const pidTransitLayer = {
   },
 
   getStats() {
+    const token = getGolemioToken();
     return {
       count: _count,
       lastUpdate: _lastUpdate,
       loading: _loading,
       error: _error,
+      mode: token ? 'live' : 'sim',
+      fallback: !token,
     };
   },
 
@@ -916,6 +1020,7 @@ export const pidTransitLayer = {
       _trackedCameraActive = false;
       _viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       if (_rowControlsListener) _rowControlsListener();
+      window.dispatchEvent(new CustomEvent('gev:pid-cockpit-changed', { detail: { active: false } }));
       return false;
     }
     const target = vehicle || _vehicles[0];
@@ -924,6 +1029,7 @@ export const pidTransitLayer = {
     _trackedCameraActive = true;
     updateCockpitCamera(_viewer, target);
     if (_rowControlsListener) _rowControlsListener();
+    window.dispatchEvent(new CustomEvent('gev:pid-cockpit-changed', { detail: { active: true, vehicle: target } }));
     return true;
   },
 

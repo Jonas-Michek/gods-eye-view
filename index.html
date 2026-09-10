@@ -731,10 +731,14 @@
             <span class="material-symbols-outlined" aria-hidden="true">rocket_launch</span>
             <span>SPACE MISSIONS</span>
           </button>
+          <button id="global-context-pid-btn" class="context-mode-button" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="context-pid-view" aria-label="PID PRAHA" title="Pražská integrovaná doprava — live radar, metro, tramvaje, památky a nadzemní sledování spojů">
+            <span class="material-symbols-outlined" aria-hidden="true">tram</span>
+            <span>PID PRAHA</span>
+          </button>
         </div>
         <div id="context-mode-standby" class="context-mode-standby">
           <strong>SELECT CONTEXT</strong>
-          <span>CONTACTS — nearest planes · vessels · sites<br>SPACE MISSIONS — launches &amp; orbital assets</span>
+          <span>CONTACTS — nearest planes · vessels · sites<br>SPACE MISSIONS — launches &amp; orbital assets<br>PID PRAHA — live transit &amp; radar</span>
         </div>
         <section id="context-flights-view" class="context-mode-view" role="tabpanel" aria-labelledby="global-context-flights-btn" hidden>
           <div class="global-context-actions" aria-label="Contact Context actions">
@@ -765,6 +769,97 @@
               <div class="space-mission-roster-list" data-mission-roster-list>
                 <div class="space-mission-roster-empty">LOADING 30-DAY MISSION INDEX</div>
               </div>
+            </div>
+          </div>
+        </section>
+        <section id="context-pid-view" class="context-mode-view" role="tabpanel" aria-labelledby="global-context-pid-btn" hidden>
+          <div class="prague-context-header">
+            <div class="prague-guide-title">
+              <span class="pulse-radar-dot"></span>
+              <span class="guide-title-text">PID PRAHA &amp; RADAR</span>
+            </div>
+            <div class="prague-header-actions">
+              <button class="prague-cockpit-btn" id="prague-cockpit-toggle" type="button" title="Sledovat vybraný spoj ze shora nad 3D povrchem města">
+                🚊 SLEDOVAT ZE SHORA
+              </button>
+            </div>
+          </div>
+
+          <!-- Filter Tabs -->
+          <div class="prague-filter-tabs">
+            <button class="filter-tab active" data-filter="radar" type="button">RADAR OKOLÍ</button>
+            <button class="filter-tab" data-filter="pois" type="button">PAMÁTKY &amp; CÍLE</button>
+            <button class="filter-tab" data-filter="metro" type="button">METRO A/B/C/D</button>
+          </div>
+
+          <!-- Radar Panel (Co ke mně jede) -->
+          <div class="prague-panel active" id="prague-panel-radar">
+            <div class="panel-section-header">
+              <span>BLÍŽÍCÍ SE SPOJE</span>
+              <button class="prague-gps-btn" id="prague-gps-locate" type="button">📍 MOJE POLOHA</button>
+            </div>
+            <div class="radar-arrivals-list" id="radar-arrivals-list">
+              <div class="radar-empty">Skenuji okolí v dosahu 1,2 km...</div>
+            </div>
+          </div>
+
+          <!-- POI Panel -->
+          <div class="prague-panel" id="prague-panel-pois">
+            <div class="panel-section-header">
+              <span>TOP PAMÁTKY S TRANZITNÍM NAVEDENÍM</span>
+            </div>
+            <div class="prague-poi-list" id="prague-poi-list">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+
+          <!-- Metro Status Panel -->
+          <div class="prague-panel" id="prague-panel-metro">
+            <div class="metro-lines-grid">
+              <div class="metro-card line-a" data-line="A">
+                <div class="line-badge" style="background:#009E60">A</div>
+                <div class="line-info">
+                  <div class="line-name">Nemocnice Motol ⇄ Depo Hostivař</div>
+                  <div class="line-status status-nominal">PROVOZ VČAS · 17 STANIC</div>
+                </div>
+              </div>
+              <div class="metro-card line-b" data-line="B">
+                <div class="line-badge" style="background:#FFBF00; color:#000">B</div>
+                <div class="line-info">
+                  <div class="line-name">Zličín ⇄ Černý Most</div>
+                  <div class="line-status status-nominal">PROVOZ VČAS · 24 STANIC</div>
+                </div>
+              </div>
+              <div class="metro-card line-c" data-line="C">
+                <div class="line-badge" style="background:#ED1C24">C</div>
+                <div class="line-info">
+                  <div class="line-name">Letňany ⇄ Háje</div>
+                  <div class="line-status status-nominal">PROVOZ VČAS · 20 STANIC</div>
+                </div>
+              </div>
+              <div class="metro-card line-d" data-line="D">
+                <div class="line-badge" style="background:#0072BB">D</div>
+                <div class="line-info">
+                  <div class="line-name">Náměstí Míru ⇄ Depo Písnice</div>
+                  <div class="line-status status-future">VÝSTAVBA PRVNÍHO ÚSEKU</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Selected Vehicle / Station / POI Card Overlay -->
+          <div class="prague-intel-card" id="prague-intel-card" style="display:none;">
+            <div class="intel-card-header">
+              <span class="intel-card-badge" id="intel-card-badge">TRAM 22</span>
+              <span class="intel-card-destination" id="intel-card-dest">Bílá Hora</span>
+              <button class="intel-card-close" id="intel-card-close" type="button" aria-label="Zavřít kartu">×</button>
+            </div>
+            <div class="intel-card-telemetry" id="intel-card-telemetry">
+              <!-- Injected via events -->
+            </div>
+            <div class="intel-card-actions">
+              <button class="intel-action-btn primary" id="intel-btn-cockpit" type="button">SLEDOVAT ZE SHORA</button>
+              <button class="intel-action-btn secondary" id="intel-btn-flyto" type="button">ZAMĚŘIT V 3D</button>
             </div>
           </div>
         </section>

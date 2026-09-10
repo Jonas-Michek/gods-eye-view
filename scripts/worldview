@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# worldview — CLI launcher & URL generator for God's Eye View
+# Focuses on Areál Matfyzu v Troji with 3D Google Photorealistic tiles and PID transit layer.
+# ==============================================================================
+set -euo pipefail
+
+DEFAULT_PORT=4173
+PRAGUE_LAT="50.1159"
+PRAGUE_LON="14.4498"
+DEFAULT_ALT="500"
+DEFAULT_HEADING="0"
+DEFAULT_PITCH="-35"
+DEFAULT_ROLL="0"
+DEFAULT_MAP="photoreal"
+DEFAULT_LAYERS="p"
+VERSION="2"
+
+PORT="${PORT:-}"
+HOST="${HOST:-}"
+FORCE_LOCALHOST=0
+OPEN_BROWSER=0
+COPY_CLIPBOARD=0
+JSON_OUTPUT=0
+ALT="$DEFAULT_ALT"
+HEADING="$DEFAULT_HEADING"
+PITCH="$DEFAULT_PITCH"
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--port)
+      PORT="$2"
+      shift 2
+      ;;
+    -H|--host)
+      HOST="$2"
+      shift 2
+      ;;
+    -l|--localhost)
+      FORCE_LOCALHOST=1
+      shift
+      ;;
+    -o|--open)
+      OPEN_BROWSER=1
+      shift
+      ;;
+    -c|--copy)
+      COPY_CLIPBOARD=1
+      shift
+      ;;
+    --json)
+      JSON_OUTPUT=1
+      shift
+      ;;
+    --alt)
+      ALT="$2"
+      shift 2
+      ;;
+    --pitch)
+      PITCH="$2"
+      shift 2
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: worldview [OPTIONS]
+
+Outputs the URL to the running God's Eye View server focused on
+Matfyz Troja campus (Prague) with 3D Google Tiles and PID transit layer enabled.
+
+Options:
+  -p, --port <port>    Specify server port (default: auto-detect, or 4173)
+  -H, --host <host>    Specify server host (default: auto-detect reachable IP/host)
+  -l, --localhost      Force localhost as host
+  -o, --open           Open URL directly in default browser
+  -c, --copy           Copy URL to system clipboard
+  --alt <meters>       Camera altitude in meters (default: 500)
+  --pitch <degrees>    Camera pitch in degrees (default: -35)
+  --json               Output details in JSON format
+  -h, --help           Show this help message
+
+Examples:
+  worldview
+  worldview --open
+  worldview --localhost
+  worldview -p 4173
+  xdg-open "$(worldview)"
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      echo "Run 'worldview --help' for usage." >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Resolve HOST
+if [[ "$FORCE_LOCALHOST" -eq 1 ]]; then
+  HOST="localhost"
+elif [[ -z "$HOST" || "$HOST" == "0.0.0.0" ]]; then
+  # Auto-detect best reachable host/IP:
+  # 1. If connected via SSH, use the server IP the SSH client connected to
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    HOST="$(echo "$SSH_CONNECTION" | awk '{print $3}')"
+  # 2. If Tailscale is active, use Tailscale IP
+  elif command -v tailscale >/dev/null 2>&1 && [[ -n "$(tailscale ip -4 2>/dev/null)" ]]; then
+    HOST="$(tailscale ip -4 2>/dev/null | head -n1)"
+  # 3. If a LAN IP exists on default route, check it
+  elif command -v ip >/dev/null 2>&1 && [[ -n "$(ip route get 1.1.1.1 2>/dev/null)" ]]; then
+    HOST="$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1)"
+  elif command -v hostname >/dev/null 2>&1 && [[ -n "$(hostname -I 2>/dev/null)" ]]; then
+    HOST="$(hostname -I | awk '{print $1}')"
+  else
+    HOST="localhost"
+  fi
+fi
+
+# If port is not explicitly specified, auto-detect running server
+DETECTED_PORT=""
+if [[ -z "$PORT" ]]; then
+  # 1. Check if a vite / preview / dev process is running with an explicit port
+  if command -v ps >/dev/null 2>&1; then
+    PROCS="$(ps -eo args 2>/dev/null | grep -E 'vite|dev-fresh|dev-cctv' | grep -v grep || true)"
+    if [[ -n "$PROCS" ]]; then
+      PROC_PORT="$(echo "$PROCS" | grep -oE -- '--port[ =]+[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)"
+      if [[ -n "$PROC_PORT" ]]; then
+        DETECTED_PORT="$PROC_PORT"
+      fi
+    fi
+  fi
+
+  # 2. Probe common ports (4173, 5173, 3000, 8080)
+  if [[ -z "$DETECTED_PORT" ]]; then
+    for candidate in 4173 5173 3000 8080; do
+      if command -v curl >/dev/null 2>&1; then
+        if curl -s -o /dev/null -w "%{http_code}" --connect-timeout 0.2 "http://127.0.0.1:${candidate}/" 2>/dev/null | grep -qE '^(200|304|301|302|404)'; then
+          DETECTED_PORT="$candidate"
+          break
+        fi
+      elif command -v ss >/dev/null 2>&1; then
+        if ss -tlpn 2>/dev/null | grep -qE ":${candidate}\b"; then
+          DETECTED_PORT="$candidate"
+          break
+        fi
+      fi
+    done
+  fi
+
+  if [[ -n "$DETECTED_PORT" ]]; then
+    PORT="$DETECTED_PORT"
+  else
+    PORT="$DEFAULT_PORT"
+    echo "[worldview] Note: Server not detected on common ports. Defaulting to port ${PORT}." >&2
+  fi
+fi
+
+# Build URL
+HASH="v=${VERSION}&lat=${PRAGUE_LAT}&lon=${PRAGUE_LON}&alt=${ALT}&heading=${HEADING}&pitch=${PITCH}&roll=${DEFAULT_ROLL}&map=${DEFAULT_MAP}&l=${DEFAULT_LAYERS}"
+URL="http://${HOST}:${PORT}/#${HASH}"
+
+if [[ "$COPY_CLIPBOARD" -eq 1 ]]; then
+  if command -v clip.exe >/dev/null 2>&1; then
+    printf '%s' "$URL" | clip.exe
+    echo "[worldview] URL copied to clipboard." >&2
+  elif command -v wl-copy >/dev/null 2>&1; then
+    printf '%s' "$URL" | wl-copy
+    echo "[worldview] URL copied to clipboard." >&2
+  elif command -v xclip >/dev/null 2>&1; then
+    printf '%s' "$URL" | xclip -selection clipboard
+    echo "[worldview] URL copied to clipboard." >&2
+  else
+    echo "[worldview] Warning: No clipboard tool found (clip.exe, wl-copy, xclip)." >&2
+  fi
+fi
+
+if [[ "$OPEN_BROWSER" -eq 1 ]]; then
+  if command -v wslview >/dev/null 2>&1; then
+    wslview "$URL"
+  elif command -v explorer.exe >/dev/null 2>&1; then
+    explorer.exe "$URL"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$URL" >/dev/null 2>&1 &
+  else
+    echo "[worldview] Warning: No browser opener found (wslview, explorer.exe, xdg-open)." >&2
+  fi
+fi
+
+if [[ "$JSON_OUTPUT" -eq 1 ]]; then
+  cat <<EOF
+{
+  "url": "$URL",
+  "host": "$HOST",
+  "port": $PORT,
+  "location": "Areál Matfyzu v Troji, Praha",
+  "lat": $PRAGUE_LAT,
+  "lon": $PRAGUE_LON,
+  "alt": $ALT,
+  "heading": $HEADING,
+  "pitch": $PITCH,
+  "mapStack": "$DEFAULT_MAP",
+  "layers": ["pid-transit"]
+}
+EOF
+else
+  printf '%s\n' "$URL"
+fi

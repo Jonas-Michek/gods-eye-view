@@ -147,7 +147,13 @@ export async function initKeySetup({ documentRef = globalThis.document, fetchImp
   const root = documentRef?.getElementById?.('key-setup');
   if (!chip || !root || root.dataset.initialized === 'true') return null;
   root.dataset.initialized = 'true';
-  const doFetch = fetchImpl || globalThis.fetch?.bind(globalThis);
+  const hostname = globalThis.location?.hostname;
+  const isLoopback = !hostname || ['localhost', '127.0.0.1', '::1', '[::1]'].includes(hostname);
+  if (!isLoopback && !fetchImpl) {
+    chip.remove();
+    root.remove();
+    return null;
+  }
 
   let status = null;
   try {

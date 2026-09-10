@@ -5323,24 +5323,24 @@ body.cockpit-mode #intel-hud .hud-right-edge { right: 22px; }
 }
 .global-context-modes {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
   margin: 0 0 10px;
 }
 .context-mode-button {
   display: flex;
   min-width: 0;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 7px 8px;
+  gap: 4px;
+  padding: 6px 3px;
   border: 1px solid rgba(98, 181, 255, .28);
   border-radius: 6px;
   color: #8fcfff;
   background: rgba(42, 113, 171, .09);
-  font: 8px/1.15 var(--font-mono);
-  letter-spacing: .09em;
+  font: 7.5px/1.1 var(--font-mono);
+  letter-spacing: .06em;
   cursor: pointer;
   transition: border-color .15s ease, color .15s ease, background .15s ease, box-shadow .15s ease;
 }
@@ -9521,70 +9521,40 @@ body.scene-playback-mode #key-setup {
   outline: none;
 }
 
-/* ── Prague Mobile Guide & Tactical Radar Dock ───────────────────────── */
-.prague-guide-dock {
-  position: fixed;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(92vw, 460px);
-  z-index: 40;
-  background: rgba(10, 15, 26, 0.88);
-  border: 1px solid rgba(0, 212, 255, 0.28);
-  border-radius: 16px;
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65), 0 0 15px rgba(0, 212, 255, 0.15) inset;
-  font-family: var(--font-mono, 'SF Mono', monospace);
+/* ── Prague Transit (PID) Right Context Rail View ───────────────────── */
+#context-pid-view {
+  display: flex;
+  flex-direction: column;
   color: #e2e8f0;
-  overflow: hidden;
-  transition: all 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  font-family: var(--font-mono, 'SF Mono', monospace);
 }
 
-body:has(#loading-screen:not(.hidden)) .prague-guide-dock,
-#loading-screen:not(.hidden) ~ .prague-guide-dock {
-  display: none !important;
-}
-
-.prague-guide-header {
+.prague-context-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  cursor: pointer;
-  user-select: none;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.prague-guide-handle {
-  position: absolute;
-  top: 5px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 36px;
-  height: 3px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 2px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 8px;
 }
 
 .prague-guide-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.72rem;
+  gap: 8px;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.12rem;
+  letter-spacing: 0.1rem;
   color: #38bdf8;
   text-transform: uppercase;
 }
 
 .pulse-radar-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   background: #38bdf8;
   border-radius: 50%;
-  box-shadow: 0 0 10px #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
   animation: radar-pulse 1.8s infinite ease-out;
 }
 
@@ -9595,11 +9565,11 @@ body:has(#loading-screen:not(.hidden)) .prague-guide-dock,
 }
 
 .prague-cockpit-btn {
-  padding: 4px 10px;
-  font-size: 0.62rem;
+  padding: 4px 8px;
+  font-size: 0.6rem;
   font-family: inherit;
   font-weight: 700;
-  letter-spacing: 0.08rem;
+  letter-spacing: 0.06rem;
   background: rgba(220, 48, 27, 0.2);
   border: 1px solid rgba(220, 48, 27, 0.5);
   color: #fca5a5;
@@ -9614,19 +9584,11 @@ body:has(#loading-screen:not(.hidden)) .prague-guide-dock,
   border-color: #dc301b;
 }
 
-/* Expandable Body */
-.prague-guide-body {
-  max-height: 0;
-  opacity: 0;
-  padding: 0 14px;
-  transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease;
-  overflow-y: auto;
-}
-
-.prague-guide-dock.expanded .prague-guide-body {
-  max-height: 52vh;
-  opacity: 1;
-  padding: 12px 14px 16px;
+.prague-cockpit-btn.active {
+  background: #dc301b;
+  border-color: #ef4444;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
 }
 
 /* Filter Tabs */
@@ -9982,9 +9944,3 @@ body:has(#loading-screen:not(.hidden)) .prague-guide-dock,
   background: rgba(56, 189, 248, 0.3);
 }
 
-@media (max-width: 480px) {
-  .prague-guide-dock {
-    width: 96vw;
-    bottom: 8px;
-  }
-}

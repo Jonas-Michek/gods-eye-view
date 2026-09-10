@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import pidTransitLayer from './pidTransit.js';
+import { DataLayerManager } from './manager.js';
 import {
   METRO_LINES,
   METRO_STATIONS,
@@ -18,6 +19,8 @@ test('pidTransitLayer conforms to the GEV DataLayer contract', () => {
   assert.equal(typeof pidTransitLayer.name, 'string');
   assert.equal(typeof pidTransitLayer.enable, 'function');
   assert.equal(typeof pidTransitLayer.disable, 'function');
+  assert.equal(typeof pidTransitLayer.update, 'function');
+  assert.equal(typeof pidTransitLayer.updateInterval, 'number');
   assert.equal(typeof pidTransitLayer.getStats, 'function');
   assert.equal(typeof pidTransitLayer.getNearbyArrivals, 'function');
   assert.equal(typeof pidTransitLayer.toggleCockpitTracking, 'function');
@@ -155,5 +158,26 @@ test('pidTransitLayer provides toggleable row controls and responds to setParams
   assert.equal(pidTransitLayer.getRowControls().chips.find((c) => c.id === 'radar').active, false);
 
   pidTransitLayer.setRowControlsListener(null);
+});
+
+test('pidTransitLayer.update executes cleanly and returns true', async () => {
+  const result = await pidTransitLayer.update();
+  assert.equal(result, true);
+});
+
+test('pidTransitLayer integrates with DataLayerManager toggle lifecycle without error', async () => {
+  const manager = new DataLayerManager({});
+  manager.register(pidTransitLayer);
+  assert.equal(manager.isEnabled('pid-transit'), false);
+
+  const enableSuccess = await manager.toggle('pid-transit');
+  assert.equal(enableSuccess, true);
+  assert.equal(manager.isEnabled('pid-transit'), true);
+  const stats = pidTransitLayer.getStats();
+  assert.ok(stats.lastUpdate);
+
+  const disableSuccess = await manager.toggle('pid-transit');
+  assert.equal(disableSuccess, true);
+  assert.equal(manager.isEnabled('pid-transit'), false);
 });
 

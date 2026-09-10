@@ -2310,9 +2310,11 @@ export class StyleManager {
     this._radioStationHomepage = document.getElementById('radio-station-homepage');
     this._globalContextFlightsBtn = document.getElementById('global-context-flights-btn');
     this._globalContextMissionsBtn = document.getElementById('global-context-missions-btn');
+    this._globalContextPidBtn = document.getElementById('global-context-pid-btn');
     this._contextModeStandby = document.getElementById('context-mode-standby');
     this._contextFlightsView = document.getElementById('context-flights-view');
     this._contextMissionsView = document.getElementById('context-missions-view');
+    this._contextPidView = document.getElementById('context-pid-view');
     this._contextMode = null;
     this._contextModeChanging = false;
     this._contextModeGeneration = 0;
@@ -2623,6 +2625,7 @@ export class StyleManager {
     this._initRadioPanel();
     this._initCctvPanel();
     this._initGlobalContextPanel();
+    this._initPidContextPanel();
     this._initLocationBar();
     this._initShareButton();
     this._initClearSelectedLayersButton();
@@ -4602,7 +4605,7 @@ export class StyleManager {
   }
 
   _initGlobalContextPanel() {
-    const contextTabs = [this._globalContextFlightsBtn, this._globalContextMissionsBtn].filter(Boolean);
+    const contextTabs = [this._globalContextFlightsBtn, this._globalContextMissionsBtn, this._globalContextPidBtn].filter(Boolean);
     contextTabs.forEach((tab, index) => tab.addEventListener('keydown', (event) => {
       let nextIndex = null;
       if (event.key === 'ArrowRight') nextIndex = (index + 1) % contextTabs.length;
@@ -4883,6 +4886,7 @@ export class StyleManager {
     this._contextModeChanging = true;
     this._globalContextFlightsBtn && (this._globalContextFlightsBtn.disabled = true);
     this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = true);
+    this._globalContextPidBtn && (this._globalContextPidBtn.disabled = true);
     try {
       if (mode !== 'flights' && this.cockpitView?.active) {
         this.cockpitView.exit({ restoreTracking: false });
@@ -4933,7 +4937,7 @@ export class StyleManager {
       // Entry is one transaction: isolation succeeded above, so a failed mode
       // activation must roll the cleared layers back instead of stranding the
       // user in a half-entered mode with an orphaned snapshot.
-      const entryLayerId = mode === 'flights' ? 'military-awareness' : 'rocket-launches';
+      const entryLayerId = mode === 'flights' ? 'military-awareness' : (mode === 'pid' ? 'pid-transit' : 'rocket-launches');
       if (mode === 'flights') {
         this._dataManager.setLayerParams('military-awareness', { passive: false });
       }
@@ -5038,6 +5042,7 @@ export class StyleManager {
         this._contextModeChanging = false;
         this._globalContextFlightsBtn && (this._globalContextFlightsBtn.disabled = false);
         this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = false);
+        this._globalContextPidBtn && (this._globalContextPidBtn.disabled = false);
         this._syncContextModeButtons();
       }
     }
@@ -5277,23 +5282,66 @@ export class StyleManager {
   _syncContextModeButtons() {
     const flightsActive = this._contextMode === 'flights';
     const missionsActive = this._contextMode === 'space-missions';
+    const pidActive = this._contextMode === 'pid';
     const panel = document.getElementById('global-context-panel');
-    panel?.classList.toggle('context-enabled', flightsActive || missionsActive);
+    panel?.classList.toggle('context-enabled', flightsActive || missionsActive || pidActive);
     panel?.setAttribute('data-context-mode', this._contextMode || 'none');
     this._globalContextFlightsBtn?.classList.toggle('active', flightsActive);
     this._globalContextFlightsBtn?.setAttribute('aria-selected', String(flightsActive));
     this._globalContextMissionsBtn?.classList.toggle('active', missionsActive);
     this._globalContextMissionsBtn?.setAttribute('aria-selected', String(missionsActive));
-    if (this._globalContextFlightsBtn) this._globalContextFlightsBtn.tabIndex = missionsActive ? -1 : 0;
+    this._globalContextPidBtn?.classList.toggle('active', pidActive);
+    this._globalContextPidBtn?.setAttribute('aria-selected', String(pidActive));
+    if (this._globalContextFlightsBtn) this._globalContextFlightsBtn.tabIndex = flightsActive ? 0 : -1;
     if (this._globalContextMissionsBtn) this._globalContextMissionsBtn.tabIndex = missionsActive ? 0 : -1;
-    if (this._contextModeStandby) this._contextModeStandby.hidden = flightsActive || missionsActive;
+    if (this._globalContextPidBtn) this._globalContextPidBtn.tabIndex = pidActive ? 0 : -1;
+    if (this._contextModeStandby) this._contextModeStandby.hidden = flightsActive || missionsActive || pidActive;
     if (this._contextFlightsView) this._contextFlightsView.hidden = !flightsActive;
     if (this._contextMissionsView) this._contextMissionsView.hidden = !missionsActive;
+    if (this._contextPidView) this._contextPidView.hidden = !pidActive;
     this.cockpitView?.syncEntry();
     // Every _contextMode mutation funnels through here; the sync no-ops until
     // the transaction settles, so this is the activation/deactivation edge.
     this._syncContactsDetection();
     this._scheduleRightPanelLayout();
+  }
+
+  /** Wire PID Praha Context panel tabs and events */
+  _initPidContextPanel() {
+    this._globalContextPidBtn?.addEventListener('click', () => {
+      const nextMode = this._contextMode === 'pid' ? null : 'pid';
+      this._claimContextVisualAuthority();
+      void this._runUserFacingContextAction(
+        (notificationToken) => this._selectContextMode(
+          nextMode,
+          { notificationToken },
+        ),
+        'PID could not complete the requested transition; try again',
+      ).then((succeeded) => {
+        if (nextMode && shouldExpandGlobalContextPanel({
+          action: 'pid',
+          explicitUserAction: true,
+          succeeded: succeeded === true,
+        })) this.setPanelCollapsed('global-context-panel', false, { explicit: true });
+      });
+    });
+    window.addEventListener('gev:open-pid-context', () => {
+      if (this._contextMode !== 'pid') {
+        void this._runUserFacingContextAction(
+          (notificationToken) => this._selectContextMode('pid', { notificationToken }),
+          'PID could not complete the requested transition; try again',
+        );
+      }
+      this.setPanelCollapsed('global-context-panel', false, { explicit: true });
+    });
+    window.addEventListener('gev:close-pid-context', () => {
+      if (this._contextMode === 'pid') {
+        void this._runUserFacingContextAction(
+          (notificationToken) => this._selectContextMode(null, { notificationToken }),
+          'PID could not complete the requested transition; try again',
+        );
+      }
+    });
   }
 
   /** Wire the independent Radio companion controls. */
@@ -9652,6 +9700,7 @@ export class StyleManager {
     this._userFacingContextNotificationTokens.add(notificationToken);
     this._globalContextFlightsBtn && (this._globalContextFlightsBtn.disabled = true);
     this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = true);
+    this._globalContextPidBtn && (this._globalContextPidBtn.disabled = true);
     this._clearSelectedLayersBtn.disabled = true;
     this._clearSelectedLayersBtn.setAttribute('aria-label', 'Clearing selected data layers');
 
@@ -9686,6 +9735,7 @@ export class StyleManager {
         this._syncContextModeButtons();
         this._globalContextFlightsBtn && (this._globalContextFlightsBtn.disabled = false);
         this._globalContextMissionsBtn && (this._globalContextMissionsBtn.disabled = false);
+        this._globalContextPidBtn && (this._globalContextPidBtn.disabled = false);
       }
       this._clearSelectedLayersBtn.disabled = false;
       this._clearSelectedLayersBtn.setAttribute('aria-label', 'Clear selected data layers');
