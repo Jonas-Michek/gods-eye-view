@@ -117,6 +117,20 @@ export const CITY_POIS = {
       { name: 'Jefferson Memorial', lat: 38.8814, lon: -77.0365, alt: 400, pitch: -30, heading: 0, buildingHeight: 25 },
     ],
   },
+  prague: {
+    name: 'Prague',
+    groundElevation: 200,
+    viewBounds: { southwest: { lat: 49.95, lng: 14.20 }, northeast: { lat: 50.20, lng: 14.75 } },
+    pois: [
+      { name: 'Charles Bridge', lat: 50.0865, lon: 14.4114, alt: 600, pitch: -25, heading: 300, buildingHeight: 30 },
+      { name: 'Prague Castle', lat: 50.0909, lon: 14.4005, alt: 750, pitch: -25, heading: 250, buildingHeight: 60 },
+      { name: 'Old Town Square', lat: 50.0875, lon: 14.4213, alt: 450, pitch: -30, heading: 0, buildingHeight: 40 },
+      { name: 'Vyšehrad', lat: 50.0644, lon: 14.4199, alt: 550, pitch: -25, heading: 45, buildingHeight: 50 },
+      { name: 'National Theatre', lat: 50.0811, lon: 14.4138, alt: 450, pitch: -22, heading: 120, buildingHeight: 35 },
+      { name: 'Dancing House', lat: 50.0754, lon: 14.4141, alt: 400, pitch: -20, heading: 60, buildingHeight: 35 },
+      { name: 'Petřín Lookout Tower', lat: 50.0835, lon: 14.3951, alt: 500, pitch: -20, heading: 90, buildingHeight: 65 },
+    ],
+  },
 };
 
 /**

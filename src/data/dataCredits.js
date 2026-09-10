@@ -74,6 +74,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    key: 'pid-transit',
+    html:
+      'Prague Public Transport (PID) &amp; Vehicle Positions: ' +
+      '<a href="https://pid.cz/o-systemu/opendata/" target="_blank" rel="noopener">Pražská integrovaná doprava</a> &amp; ' +
+      '<a href="https://golemio.cz" target="_blank" rel="noopener">Datová platforma Golemio</a> (CC-BY 4.0)',
+  },
+  {
     key: 'military-installations-osm',
     html:
       'Mapped installation context: ' +

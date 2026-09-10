@@ -9520,3 +9520,471 @@ body.scene-playback-mode #key-setup {
   border-color: rgba(255, 170, 150, 0.65);
   outline: none;
 }
+
+/* ── Prague Mobile Guide & Tactical Radar Dock ───────────────────────── */
+.prague-guide-dock {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 460px);
+  z-index: 40;
+  background: rgba(10, 15, 26, 0.88);
+  border: 1px solid rgba(0, 212, 255, 0.28);
+  border-radius: 16px;
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65), 0 0 15px rgba(0, 212, 255, 0.15) inset;
+  font-family: var(--font-mono, 'SF Mono', monospace);
+  color: #e2e8f0;
+  overflow: hidden;
+  transition: all 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+body:has(#loading-screen:not(.hidden)) .prague-guide-dock,
+#loading-screen:not(.hidden) ~ .prague-guide-dock {
+  display: none !important;
+}
+
+.prague-guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.prague-guide-handle {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 2px;
+}
+
+.prague-guide-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12rem;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
+.pulse-radar-dot {
+  width: 8px;
+  height: 8px;
+  background: #38bdf8;
+  border-radius: 50%;
+  box-shadow: 0 0 10px #38bdf8;
+  animation: radar-pulse 1.8s infinite ease-out;
+}
+
+@keyframes radar-pulse {
+  0% { transform: scale(0.9); opacity: 1; }
+  50% { transform: scale(1.6); opacity: 0.4; }
+  100% { transform: scale(0.9); opacity: 1; }
+}
+
+.prague-cockpit-btn {
+  padding: 4px 10px;
+  font-size: 0.62rem;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08rem;
+  background: rgba(220, 48, 27, 0.2);
+  border: 1px solid rgba(220, 48, 27, 0.5);
+  color: #fca5a5;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.prague-cockpit-btn:hover {
+  background: rgba(220, 48, 27, 0.45);
+  color: #fff;
+  border-color: #dc301b;
+}
+
+/* Expandable Body */
+.prague-guide-body {
+  max-height: 0;
+  opacity: 0;
+  padding: 0 14px;
+  transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease;
+  overflow-y: auto;
+}
+
+.prague-guide-dock.expanded .prague-guide-body {
+  max-height: 52vh;
+  opacity: 1;
+  padding: 12px 14px 16px;
+}
+
+/* Filter Tabs */
+.prague-filter-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.filter-tab {
+  flex: 1;
+  padding: 6px 4px;
+  font-family: inherit;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06rem;
+  color: rgba(255, 255, 255, 0.55);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-tab.active {
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.prague-panel {
+  display: none;
+}
+
+.prague-panel.active {
+  display: block;
+}
+
+.panel-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.08rem;
+  margin-bottom: 8px;
+}
+
+.prague-gps-btn {
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 0.55rem;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.radar-arrivals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.radar-arrival-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.radar-arrival-row:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.35);
+  transform: translateX(2px);
+}
+
+.radar-row-badge {
+  padding: 4px 8px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  border-radius: 6px;
+  background: #dc301b;
+  color: #fff;
+  min-width: 28px;
+  text-align: center;
+}
+
+.radar-row-badge.metro {
+  background: #009E60;
+}
+
+.radar-row-badge.bus {
+  background: #00B5E2;
+}
+
+.radar-row-badge.ferry {
+  background: #0066CC;
+}
+
+.radar-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.radar-row-dest {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.radar-row-meta {
+  font-size: 0.56rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.radar-row-eta {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #38bdf8;
+  white-space: nowrap;
+}
+
+.radar-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* POIs Grid */
+.prague-poi-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.poi-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.poi-list-item:hover {
+  background: rgba(56, 189, 248, 0.08);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+.poi-item-name {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.poi-item-sub {
+  font-size: 0.56rem;
+  color: #94a3b8;
+}
+
+.poi-item-btn {
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 0.58rem;
+  font-weight: 700;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+  border-radius: 4px;
+}
+
+/* Metro Grid */
+.metro-lines-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metro-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.line-badge {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 900;
+  border-radius: 8px;
+}
+
+.line-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.line-status {
+  font-size: 0.56rem;
+  letter-spacing: 0.06rem;
+}
+
+.status-nominal {
+  color: #4ade80;
+}
+
+.status-future {
+  color: #60a5fa;
+}
+
+/* Selected Intel Card */
+.prague-intel-card {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #38bdf8;
+  border-radius: 10px;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.2);
+}
+
+.intel-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.intel-card-badge {
+  padding: 3px 8px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  border-radius: 4px;
+}
+
+.intel-card-destination {
+  flex: 1;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.intel-card-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.intel-card-telemetry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.62rem;
+  margin-bottom: 10px;
+}
+
+.telemetry-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.telemetry-desc {
+  font-size: 0.62rem;
+  color: #94a3b8;
+  margin-bottom: 6px;
+  line-height: 1.35;
+}
+
+.telemetry-tip {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: rgba(56, 189, 248, 0.08);
+  border-left: 2px solid #38bdf8;
+  border-radius: 2px;
+  color: #bae6fd;
+  font-size: 0.58rem;
+}
+
+.font-highlight {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.delay-good {
+  color: #4ade80;
+  font-weight: 700;
+}
+
+.delay-bad {
+  color: #f87171;
+  font-weight: 700;
+}
+
+.intel-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.intel-action-btn {
+  flex: 1;
+  padding: 7px;
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 700;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.intel-action-btn.primary {
+  background: #dc301b;
+  border: 1px solid #ef4444;
+  color: #fff;
+}
+
+.intel-action-btn.primary:hover {
+  background: #b91c1c;
+}
+
+.intel-action-btn.secondary {
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  color: #38bdf8;
+}
+
+.intel-action-btn.secondary:hover {
+  background: rgba(56, 189, 248, 0.3);
+}
+
+@media (max-width: 480px) {
+  .prague-guide-dock {
+    width: 96vw;
+    bottom: 8px;
+  }
+}

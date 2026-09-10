@@ -14,6 +14,8 @@ import bikeshareLayer from './data/bikeshare.js';
 import aisLiveVesselsLayer from './data/aisLiveVessels.js';
 import militaryInstallationsLayer from './data/militaryInstallations.js';
 import militaryAwarenessLayer from './data/militaryAwareness.js';
+import pidTransitLayer from './data/pidTransit.js';
+import { initPragueMobileGuide } from './ui/pragueMobileGuide.js';
 import localDataLayers from './data/localLayers.js';
 import { LAYER_STATE_REGISTRY } from './data/layerState.js';
 import { registerDataCredits } from './data/dataCredits.js';
@@ -221,6 +223,7 @@ async function init() {
     dataManager.register(militaryInstallationsLayer);
     dataManager.register(militaryAwarenessLayer);
     militaryAwarenessLayer.attachDataManager(dataManager);
+    dataManager.register(pidTransitLayer);
     for (const layer of localDataLayers) {
       dataManager.register(layer);
     }
@@ -238,6 +241,9 @@ async function init() {
     }
     dataManager.buildTogglePanel(document.getElementById('data-toggles'));
     styleManager.attachDataManager(dataManager);
+
+    // Initialize Mobile Prague Guide & Tactical Radar dock
+    initPragueMobileGuide(viewer);
 
     // Initialize deterministic scene playback for social clip capture
     const sceneDirector = new SceneDirector(viewer, styleManager, dataManager);
