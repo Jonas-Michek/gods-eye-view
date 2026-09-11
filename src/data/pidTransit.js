@@ -157,7 +157,11 @@ function prepareRouteNodes(rawPath, stops) {
     return (stops || []).map((s) => ({ ...s }));
   }
 
-  const nodes = rawPath.map((p) => ({ lat: p.lat, lon: p.lon }));
+  const nodes = rawPath.map((p) => ({
+    lat: p.lat,
+    lon: p.lon,
+    alt: p.alt ?? PRAGUE_SURFACE_ALT,
+  }));
 
   if (stops && stops.length > 0) {
     for (const stop of stops) {
@@ -362,6 +366,9 @@ function updateFleetMotion(dtSec = 0.05) {
     if (currFrom && currTo) {
       v.lat = currFrom.lat + (currTo.lat - currFrom.lat) * v.progress;
       v.lon = currFrom.lon + (currTo.lon - currFrom.lon) * v.progress;
+      const fromAlt = currFrom.alt ?? PRAGUE_SURFACE_ALT;
+      const toAlt = currTo.alt ?? PRAGUE_SURFACE_ALT;
+      v.alt = fromAlt + (toAlt - fromAlt) * v.progress;
       v.bearing = calculateBearing(currFrom.lat, currFrom.lon, currTo.lat, currTo.lon);
       v.nextStop = currTo.nextStop || currTo.name || v.direction;
     }
@@ -459,17 +466,18 @@ function buildStaticTrackPolylines(viewer) {
       _trackEntities.push(ent);
     });
 
-    // 2. Tram corridors
+    // 2. Tram corridors (draped on surface across 3D tiles and 2D terrain)
     TRAM_LINES.forEach((tram) => {
       const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
-      const positions = coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0));
+      const positions = coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt || PRAGUE_SURFACE_ALT));
       const ent = viewer.entities.add({
         id: `pid-track-tram-${tram.line}`,
         polyline: {
           positions,
-          width: 3.5,
-          material: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
-          depthFailMaterial: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.6),
+          width: 4.5,
+          material: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.92),
+          clampToGround: true,
+          classificationType: Cesium.ClassificationType ? Cesium.ClassificationType.BOTH : undefined,
           arcType: Cesium.ArcType ? Cesium.ArcType.GEODESIC : undefined,
         },
       });
@@ -508,10 +516,10 @@ function buildStaticTrackPolylines(viewer) {
     TRAM_LINES.forEach((tram) => {
       const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
       polylines.add({
-        positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0)),
-        width: 3.5,
+        positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt || PRAGUE_SURFACE_ALT)),
+        width: 4.0,
         material: Cesium.Material.fromType('Color', {
-          color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
+          color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.9),
         }),
         id: `pid-track-tram-${tram.line}`,
       });
@@ -588,10 +596,11 @@ function buildBillboardCollections(viewer) {
     }
 
     const bb = billboards.add({
-      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, PRAGUE_SURFACE_ALT + 5.0),
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, (v.alt || PRAGUE_SURFACE_ALT) + 2.0),
       image: icon,
       width: 28,
       height: 28,
+      heightReference: Cesium.HeightReference ? Cesium.HeightReference.CLAMP_TO_GROUND : undefined,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       scaleByDistance: new Cesium.NearFarScalar(300, 1.2, 35000, 0.5),
       id: v.id,
@@ -680,7 +689,7 @@ function startAnimationLoop(viewer) {
     // Update Cesium billboards on surface
     for (const v of _vehicles) {
       if (!v.billboard) continue;
-      v.billboard.position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, PRAGUE_SURFACE_ALT + 5.0);
+      v.billboard.position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, (v.alt || PRAGUE_SURFACE_ALT) + 2.0);
     }
 
     // If a vehicle is currently tracked in Cockpit View, sync camera
@@ -702,8 +711,8 @@ function updateCockpitCamera(viewer, vehicle) {
   if (!viewer || !vehicle) return;
   const headingRad = Cesium.Math.toRadians(vehicle.bearing || 0);
 
-  // Surface elevation resolver: query scene height or globe height or fallback to Prague terrain MSL
-  let groundAlt = 240;
+  // Surface elevation resolver: query scene height or globe height or fallback to vehicle alt
+  let groundAlt = vehicle.alt || 240;
   try {
     const carto = Cesium.Cartographic.fromDegrees(vehicle.lon, vehicle.lat);
     if (viewer.scene?.sampleHeightSupported && typeof viewer.scene.sampleHeight === 'function') {

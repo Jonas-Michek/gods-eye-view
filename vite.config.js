@@ -7410,6 +7410,270 @@ function weatherEffectsProxy() {
     },
   };
 }
+/**
+ * Vite plugin: České dráhy (Czech Railways) API Proxy.
+ *
+ * Proxies station search and live train connection queries to the public mobile
+ * ČD backend (https://ipws.cdis.cz/IP.svc), adding in-memory caching and session reuse.
+ */
+function cdProxy() {
+  const CD_API_BASE = 'https://ipws.cdis.cz/IP.svc';
+  const CD_APP_ID = '{A6AB5B3E-8A7E-4E84-9DC8-801561CE886F}';
+  const CD_USER_DESC = '294|34|MCP-Client|^|mcp-cd-server|en|US|440|1080|2154|1.0.0';
+
+  let _cdSessionId = null;
+  let _cdSessionAt = 0;
+  const CD_SESSION_TTL_MS = 45 * 60 * 1000; // 45 min
+
+  const _stationCache = new Map(); // query -> { timestamp, data }
+  const _connCache = new Map(); // key -> { timestamp, data }
+
+  async function getCdSession() {
+    const now = Date.now();
+    if (_cdSessionId && now - _cdSessionAt < CD_SESSION_TTL_MS) {
+      return _cdSessionId;
+    }
+    const res = await fetch(`${CD_API_BASE}/CreateSession`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/4.9.3' },
+      body: JSON.stringify({
+        iLang: 1,
+        sAppID: CD_APP_ID,
+        sUserDesc: CD_USER_DESC,
+        sUser: '',
+        sPwd: '',
+        iTokenType: 1,
+      }),
+    });
+    if (!res.ok) throw new Error(`ČD CreateSession failed: ${res.status}`);
+    const json = await res.json();
+    _cdSessionId = json.d.sSessionID;
+    _cdSessionAt = now;
+    return _cdSessionId;
+  }
+
+  async function searchCdStations(mask, maxCount = 8) {
+    const norm = String(mask || '').trim().toLowerCase();
+    if (!norm) return [];
+    const cached = _stationCache.get(norm);
+    if (cached && nowTime() - cached.timestamp < 15 * 60 * 1000) {
+      return cached.data;
+    }
+    const res = await fetch(`${CD_API_BASE}/SearchGlobalListItemInfoExt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/4.9.3' },
+      body: JSON.stringify({
+        iLang: 1,
+        sMask: norm,
+        iMaxCount: maxCount,
+        sAppID: CD_APP_ID,
+        sUserDesc: CD_USER_DESC,
+      }),
+    });
+    if (!res.ok) throw new Error(`ČD SearchStations failed: ${res.status}`);
+    const json = await res.json();
+    const items = (json.d || []).map((item) => ({
+      id: item.oItem?.iListID,
+      name: item.oItem?.sName,
+      region: item.sRegion || '',
+    }));
+    _stationCache.set(norm, { timestamp: Date.now(), data: items });
+    return items;
+  }
+
+  function nowTime() {
+    return Date.now();
+  }
+
+  async function searchCdConnections(fromName, toName, depTime) {
+    const fromStations = await searchCdStations(fromName, 2);
+    const toStations = await searchCdStations(toName, 2);
+    if (!fromStations.length) throw new Error(`Výchozí stanice nenalezena: "${fromName}"`);
+    if (!toStations.length) throw new Error(`Cílová stanice nenalezena: "${toName}"`);
+
+    const from = fromStations[0];
+    const to = toStations[0];
+
+    const depMs = depTime ? new Date(depTime).getTime() || Date.now() : Date.now();
+    const cacheKey = `${from.id}:${to.id}:${Math.floor(depMs / 60000)}`;
+    const cached = _connCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 30000) {
+      return cached.data;
+    }
+
+    const sessionId = await getCdSession();
+
+    const res = await fetch(`${CD_API_BASE}/SearchConnectionInfo1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'User-Agent': 'okhttp/4.9.3' },
+      body: JSON.stringify({
+        iLang: 1,
+        sSessionID: sessionId,
+        oFrom: { iListID: from.id, sName: from.name },
+        oTo: { iListID: to.id, sName: to.name },
+        aoVia: [],
+        aoChange: [],
+        dtDateTime: `/Date(${depMs})/`,
+        bIsDep: true,
+        oConnParms: { iSearchConnectionFlags: 0, iCarrier: 2 },
+        iMaxObjectsCount: 0,
+        iMaxCount: 6,
+        oPriceRequestClass: { iClass: 2, bBusiness: false },
+        aoPassengers: [{ oPassenger: { iPassengerId: 5 }, iCount: 1, iAge: -1 }],
+      }),
+    });
+    if (!res.ok) throw new Error(`ČD SearchConnectionInfo failed: ${res.status}`);
+    const json = await res.json();
+    const rawConns = json.d?.oConnInfo?.aoConnections || [];
+
+    const connections = rawConns.map((conn) => {
+      const trains = (conn.aoTrains || []).map((t) => {
+        const depMatch = t.dtDateTime1 ? t.dtDateTime1.match(/\d+/) : null;
+        const arrMatch = t.dtDateTime2 ? t.dtDateTime2.match(/\d+/) : null;
+        const depTimestamp = depMatch ? parseInt(depMatch[0], 10) : depMs;
+        const arrTimestamp = arrMatch ? parseInt(arrMatch[0], 10) : depMs;
+        return {
+          trainType: t.sType || 'Vlak',
+          trainNum: t.sNum1 || '',
+          trainTitle: t.sNum2 || '',
+          trainName: [t.sType, t.sNum1, t.sNum2].filter(Boolean).join(' '),
+          line: t.sNum3 || '',
+          fromStation: t.sStationName1 || from.name,
+          fromKey: t.iStationKey1 || null,
+          toStation: t.sStationName2 || to.name,
+          toKey: t.iStationKey2 || null,
+          departureTime: new Date(depTimestamp).toISOString(),
+          arrivalTime: new Date(arrTimestamp).toISOString(),
+          depTimestamp,
+          arrTimestamp,
+        };
+      });
+
+      const first = trains[0];
+      const last = trains[trains.length - 1];
+
+      let delayMinutes = 0;
+      if (conn.sDelay && !conn.sDelay.includes('Včas') && !conn.sDelay.includes('on time')) {
+        const m = conn.sDelay.match(/\+\s*(\d+)/);
+        if (m) delayMinutes = parseInt(m[1], 10);
+      }
+
+      return {
+        id: conn.iID,
+        trains,
+        firstDeparture: first?.departureTime,
+        lastArrival: last?.arrivalTime,
+        totalDuration: conn.sTimeLength || '',
+        distance: conn.sDistance || '',
+        delayText: conn.sDelay || 'Včas',
+        delayMinutes,
+        transfers: Math.max(0, trains.length - 1),
+        fromStation: first?.fromStation || from.name,
+        toStation: last?.toStation || to.name,
+      };
+    });
+
+    const result = {
+      from: from.name,
+      to: to.name,
+      count: connections.length,
+      connections,
+    };
+    _connCache.set(cacheKey, { timestamp: Date.now(), data: result });
+    return result;
+  }
+
+  function readJsonBody(req) {
+    return new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', (chunk) => { data += chunk; });
+      req.on('end', () => {
+        try {
+          resolve(data ? JSON.parse(data) : {});
+        } catch (e) {
+          reject(e);
+        }
+      });
+      req.on('error', reject);
+    });
+  }
+
+  function install(middlewares) {
+    middlewares.use('/api/cd', async (req, res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const url = new URL(req.url || '/', 'http://localhost');
+      const pathname = url.pathname.replace(/\/+$/, '');
+
+      try {
+        if (pathname === '/stations') {
+          let q = url.searchParams.get('q') || url.searchParams.get('query');
+          if (!q && req.method === 'POST') {
+            const body = await readJsonBody(req);
+            q = body.query || body.q;
+          }
+          if (!q) {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ stations: [] }));
+            return;
+          }
+          const stations = await searchCdStations(q);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ stations }));
+          return;
+        }
+
+        if (pathname === '/connections') {
+          let from = url.searchParams.get('from');
+          let to = url.searchParams.get('to');
+          let dep = url.searchParams.get('departure') || url.searchParams.get('dep');
+          if ((!from || !to) && req.method === 'POST') {
+            const body = await readJsonBody(req);
+            from = from || body.from;
+            to = to || body.to;
+            dep = dep || body.departure || body.dep;
+          }
+
+          if (!from || !to) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Chybí parametry from nebo to' }));
+            return;
+          }
+
+          const result = await searchCdConnections(from, to, dep);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+          return;
+        }
+
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Neznámý ČD endpoint' }));
+      } catch (err) {
+        console.error('[ČD Proxy Error]', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Chyba ČD proxy' }));
+      }
+    });
+  }
+
+  return {
+    name: 'cd-proxy',
+    configureServer(server) {
+      install(server.middlewares);
+    },
+    configurePreviewServer(server) {
+      install(server.middlewares);
+    },
+  };
+}
 
 function parseJsonEnv(key, fallback) {
   const value = process.env[key];
@@ -7760,6 +8024,7 @@ export default defineConfig(({ mode }) => {
       openAiRealtimeProxy(),
       googlePlacesContextProxy(),
       keySetupEndpoint(),
+      cdProxy(),
     ],
     server: {
       host: env.HOST || 'localhost',
