@@ -15,6 +15,7 @@ import * as Cesium from 'cesium';
 import { registerPickOwner, unregisterPickOwner } from './pickRegistry.js';
 import { registerSpriteCollection, restoreSpriteOrder } from './spriteOrder.js';
 import { governorRequestRender } from '../renderGovernor.js';
+import { getKeyholeGeometry } from '../celestialRing.js';
 import {
   PRAGUE_BOUNDS,
   METRO_LINES,
@@ -28,6 +29,11 @@ import {
 } from './pragueTransitData.js';
 import { PRAGUE_POIS } from './praguePoi.js';
 import { showPragueGuide, hidePragueGuide } from '../ui/pragueMobileGuide.js';
+import {
+  initTramModelManager,
+  updateTramModels,
+  destroyTramModelManager,
+} from './tramModelManager.js';
 
 // --- SVG Icons (Data URIs) ---
 
@@ -126,6 +132,12 @@ let _rowControlsListener = null;
 
 // Active simulated or live vehicle fleet
 const _vehicles = [];
+let _visibleCount = 0;
+
+// Scratch projection vectors
+const _scratchCartesian = new Cesium.Cartesian3();
+const _scratchWinCoord = new Cesium.Cartesian2();
+const _scratchCamDirVec = new Cesium.Cartesian3();
 
 // Helper to compute bearing between two coords
 function calculateBearing(lat1, lon1, lat2, lon2) {
@@ -228,7 +240,8 @@ function createInitialFleet() {
 
   // Trams
   TRAM_LINES.forEach((tramRoute) => {
-    const count = 3; // 3 trams per key route
+    const isMajor = ['9', '17', '22', '42'].includes(tramRoute.line);
+    const count = isMajor ? 4 : (tramRoute.night ? 2 : 3);
     for (let i = 0; i < count; i++) {
       const forward = i % 2 === 0;
       const rawPath = tramRoute.path && tramRoute.path.length > 0 ? tramRoute.path : tramRoute.stops;
@@ -422,7 +435,8 @@ async function fetchGolemioPositions(token, { signal = null } = {}) {
     });
 
     if (pragueFeatures.length > 0) {
-      _count = pragueFeatures.length;
+      syncGolemioFeatures(pragueFeatures);
+      _count = _vehicles.length;
       _lastUpdate = Date.now();
       _error = null;
       return true;
@@ -432,6 +446,71 @@ async function fetchGolemioPositions(token, { signal = null } = {}) {
     console.warn('[PID Transit] Golemio fetch error:', err);
   }
   return false;
+}
+
+/**
+ * Merge live Golemio vehicle features into local _vehicles fleet
+ */
+function syncGolemioFeatures(features) {
+  for (let i = 0; i < features.length; i++) {
+    const f = features[i];
+    const coords = f.geometry?.coordinates;
+    if (!coords || coords.length < 2) continue;
+    const lon = coords[0];
+    const lat = coords[1];
+    const props = f.properties || {};
+    const trip = props.trip || {};
+    const lastPos = props.last_position || {};
+    const routeType = trip.route_type;
+    const line = trip.gtfs_route_short_name || '?';
+    const type = routeType === 1 ? 'metro' : (routeType === 3 ? 'bus' : 'tram');
+    const vehId = props.vehicle_id ? `pid-golemio-${props.vehicle_id}` : `pid-golemio-f-${i}`;
+
+    let vehicle = _vehicles.find((v) => v.id === vehId);
+    if (!vehicle) {
+      vehicle = {
+        id: vehId,
+        type,
+        line,
+        lineName: type === 'metro' ? `Metro ${line}` : (type === 'bus' ? `Bus ${line}` : `Tram ${line}`),
+        direction: trip.headsign || '',
+        lat,
+        lon,
+        depth: type === 'metro' ? 20 : 0,
+        bearing: lastPos.bearing || 0,
+        speedMps: (lastPos.speed || 30) / 3.6,
+        delayMin: lastPos.delay?.actual ? (lastPos.delay.actual / 60).toFixed(1) : '0.0',
+        wheelchair: Boolean(trip.is_wheelchair_accessible),
+        airConditioned: Boolean(trip.is_air_conditioned),
+        nextStop: lastPos.next_stop?.name || trip.headsign || '',
+        isLive: true,
+      };
+      _vehicles.push(vehicle);
+
+      if (_billboardCollection && _viewer) {
+        let icon = ICONS.tram;
+        if (type === 'metro') icon = ICONS[`metro${line}`] || ICONS.metroA;
+        else if (type === 'bus') icon = ICONS.bus;
+
+        vehicle.billboard = _billboardCollection.add({
+          position: Cesium.Cartesian3.fromDegrees(lon, lat, PRAGUE_SURFACE_ALT + 2.0),
+          image: icon,
+          width: 28,
+          height: 28,
+          heightReference: Cesium.HeightReference ? Cesium.HeightReference.CLAMP_TO_GROUND : undefined,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(300, 1.2, 35000, 0.5),
+          id: vehicle.id,
+        });
+      }
+    } else {
+      vehicle.lat = lat;
+      vehicle.lon = lon;
+      vehicle.bearing = lastPos.bearing || vehicle.bearing;
+      vehicle.delayMin = lastPos.delay?.actual ? (lastPos.delay.actual / 60).toFixed(1) : vehicle.delayMin;
+      vehicle.nextStop = lastPos.next_stop?.name || vehicle.nextStop;
+    }
+  }
 }
 
 /**
@@ -474,8 +553,8 @@ function buildStaticTrackPolylines(viewer) {
         id: `pid-track-tram-${tram.line}`,
         polyline: {
           positions,
-          width: 4.5,
-          material: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.92),
+          width: tram.scenic ? 4.5 : (tram.night ? 2.5 : 3.2),
+          material: Cesium.Color.fromCssColorString(tram.color).withAlpha(tram.scenic ? 0.92 : (tram.night ? 0.75 : 0.85)),
           clampToGround: true,
           classificationType: Cesium.ClassificationType ? Cesium.ClassificationType.BOTH : undefined,
           arcType: Cesium.ArcType ? Cesium.ArcType.GEODESIC : undefined,
@@ -517,9 +596,9 @@ function buildStaticTrackPolylines(viewer) {
       const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
       polylines.add({
         positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt || PRAGUE_SURFACE_ALT)),
-        width: 4.0,
+        width: tram.scenic ? 4.0 : (tram.night ? 2.2 : 2.8),
         material: Cesium.Material.fromType('Color', {
-          color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.9),
+          color: Cesium.Color.fromCssColorString(tram.color).withAlpha(tram.scenic ? 0.9 : 0.75),
         }),
         id: `pid-track-tram-${tram.line}`,
       });
@@ -615,18 +694,6 @@ function buildBillboardCollections(viewer) {
  * Filter vehicles, stations and track polylines based on mode selection
  */
 function applyFilter() {
-  for (const v of _vehicles) {
-    if (v.billboard) {
-      if (_filter === 'all') {
-        v.billboard.show = true;
-      } else if (_filter === 'metro') {
-        v.billboard.show = (v.type === 'metro');
-      } else if (_filter === 'tram') {
-        v.billboard.show = (v.type === 'tram');
-      }
-    }
-  }
-
   for (const ent of _trackEntities) {
     if (!ent || !ent.id) continue;
     if (typeof ent.id === 'string') {
@@ -668,7 +735,163 @@ function applyFilter() {
     }
   }
 
+  updateVehiclesVisibilityAndPositions(_viewer);
   governorRequestRender();
+}
+
+/**
+ * Compute the screen-space grid cell size for LOD density decimation
+ * based on camera altitude.
+ *
+ * - Below 2,500m (Street level): 0 (100% density, all trams in circle visible)
+ * - 2,500m - 5,500m (District level): 32px (reduces icon overlap)
+ * - 5,500m - 12,000m (City level): 46px (clean overview of lines across Prague)
+ * - Above 12,000m (Overview level): 64px (only major/páteřní routes)
+ *
+ * @param {number} cameraHeight Altitude in meters above ellipsoid
+ * @returns {number} Cell size in screen pixels (0 = no thinning)
+ */
+export function calculateZoomDensityCellSize(cameraHeight) {
+  if (cameraHeight >= 12000) return 64;
+  if (cameraHeight >= 5500) return 46;
+  if (cameraHeight >= 2500) return 32;
+  return 0;
+}
+
+/**
+ * Filter and update vehicles positions, culling those outside keyhole circle
+ * and dynamically adjusting density according to camera zoom altitude.
+ *
+ * @param {Cesium.Viewer} viewer
+ */
+export function updateVehiclesVisibilityAndPositions(viewer) {
+  if (!viewer) return;
+
+  const scene = viewer.scene;
+  const canvas = scene?.canvas;
+  const camera = viewer.camera;
+  const canProject = Boolean(canvas && scene && typeof Cesium?.SceneTransforms?.wgs84ToWindowCoordinates === 'function');
+
+  let keyholeRadius = 0;
+  let keyholeCenterX = 0;
+  let keyholeCenterY = 0;
+  let cameraHeight = 3000;
+
+  if (canProject) {
+    const w = canvas.clientWidth || canvas.width || 800;
+    const h = canvas.clientHeight || canvas.height || 600;
+    const keyhole = getKeyholeGeometry(w, h);
+    if (keyhole && keyhole.radius > 0) {
+      keyholeRadius = keyhole.radius + (keyhole.featherPx || 0);
+      keyholeCenterX = keyhole.centerX;
+      keyholeCenterY = keyhole.centerY;
+    } else {
+      keyholeRadius = Math.min(w, h) * 0.52;
+      keyholeCenterX = w * 0.5;
+      keyholeCenterY = h * 0.5;
+    }
+    if (camera?.positionCartographic?.height) {
+      cameraHeight = camera.positionCartographic.height;
+    }
+  }
+
+  const minScreenCellPx = calculateZoomDensityCellSize(cameraHeight);
+  const occupiedCells = minScreenCellPx > 0 ? new Set() : null;
+  const keyholeRadiusSq = keyholeRadius * keyholeRadius;
+  const camPosWC = camera?.positionWC;
+  const camDirWC = camera?.directionWC;
+
+  let visibleCount = 0;
+
+  for (const v of _vehicles) {
+    if (!v.billboard) continue;
+
+    // 1. Update billboard 3D position
+    const pos = Cesium.Cartesian3.fromDegrees(
+      v.lon,
+      v.lat,
+      (v.alt || PRAGUE_SURFACE_ALT) + 2.0,
+      _scratchCartesian,
+    );
+    v.billboard.position = pos;
+
+    // 2. Base category filter ('all' | 'metro' | 'tram')
+    if (_filter === 'metro' && v.type !== 'metro') {
+      v.billboard.show = false;
+      continue;
+    }
+    if (_filter === 'tram' && v.type !== 'tram') {
+      v.billboard.show = false;
+      continue;
+    }
+
+    // 3. If selected vehicle or tracked camera, always show
+    if (_selectedVehicle && v.id === _selectedVehicle.id) {
+      v.billboard.show = true;
+      visibleCount++;
+      continue;
+    }
+
+    // If cannot project (headless / test), accept filter
+    if (!canProject) {
+      v.billboard.show = true;
+      visibleCount++;
+      continue;
+    }
+
+    // 4. Frustum culling / behind camera check
+    if (camPosWC && camDirWC) {
+      const toPt = Cesium.Cartesian3.subtract(pos, camPosWC, _scratchCamDirVec);
+      const dot = Cesium.Cartesian3.dot(camDirWC, toPt);
+      if (dot <= 0) {
+        v.billboard.show = false;
+        continue;
+      }
+    }
+
+    // 5. Screen projection
+    const winCoord = Cesium.SceneTransforms.wgs84ToWindowCoordinates(scene, pos, _scratchWinCoord);
+    if (!winCoord) {
+      v.billboard.show = false;
+      continue;
+    }
+
+    // 6. Keyhole Circle Culling (vykreslovat jen v viewportu - tom kruhu)
+    const dx = winCoord.x - keyholeCenterX;
+    const dy = winCoord.y - keyholeCenterY;
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq > keyholeRadiusSq) {
+      v.billboard.show = false;
+      continue;
+    }
+
+    // 7. Zoom-dependent density decimation (se zoomem se zmenšuje densita)
+    if (occupiedCells) {
+      const isPriority = v.type === 'metro' || ['9', '17', '22', '42'].includes(v.line);
+      // At overview level (> 12km), only show priority lines
+      if (cameraHeight >= 12000 && !isPriority) {
+        v.billboard.show = false;
+        continue;
+      }
+
+      const cellX = Math.floor(winCoord.x / minScreenCellPx);
+      const cellY = Math.floor(winCoord.y / minScreenCellPx);
+      const cellKey = `${cellX}:${cellY}`;
+
+      if (occupiedCells.has(cellKey)) {
+        v.billboard.show = false;
+        continue;
+      }
+      occupiedCells.add(cellKey);
+    }
+
+    // Passed all checks!
+    v.billboard.show = true;
+    visibleCount++;
+  }
+
+  _visibleCount = visibleCount;
 }
 
 /**
@@ -686,11 +909,11 @@ function startAnimationLoop(viewer) {
     // Step physics / track progress
     updateFleetMotion(dt);
 
-    // Update Cesium billboards on surface
-    for (const v of _vehicles) {
-      if (!v.billboard) continue;
-      v.billboard.position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, (v.alt || PRAGUE_SURFACE_ALT) + 2.0);
-    }
+    // Update Cesium billboards on surface with circle culling and zoom density LOD
+    updateVehiclesVisibilityAndPositions(viewer);
+
+    // Update close-zoom 3D Tatra T3 models
+    updateTramModels(viewer, _vehicles);
 
     // If a vehicle is currently tracked in Cockpit View, sync camera
     if (_trackedCameraActive && _selectedVehicle) {
@@ -859,6 +1082,7 @@ export const pidTransitLayer = {
 
     buildStaticTrackPolylines(viewer);
     buildBillboardCollections(viewer);
+    initTramModelManager(viewer);
     applyFilter();
     setupClickHandling(viewer);
     startAnimationLoop(viewer);
@@ -878,6 +1102,7 @@ export const pidTransitLayer = {
     if (!_enabled) return true;
     _enabled = false;
 
+    destroyTramModelManager(viewer);
     hidePragueGuide();
 
     if (_pollTimer) {
@@ -951,6 +1176,7 @@ export const pidTransitLayer = {
     const token = getGolemioToken();
     return {
       count: _count,
+      visibleCount: _visibleCount,
       lastUpdate: _lastUpdate,
       loading: _loading,
       error: _error,
@@ -1012,7 +1238,7 @@ export const pidTransitLayer = {
         { label: 'Metro B', color: METRO_COLORS.B, count: 24, blurb: 'Zličín ⇄ Černý Most' },
         { label: 'Metro C', color: METRO_COLORS.C, count: 20, blurb: 'Letňany ⇄ Háje' },
         { label: 'Metro D', color: METRO_COLORS.D, count: 10, blurb: 'Náměstí Míru ⇄ Depo Písnice' },
-        { label: 'Tramvaje', color: TRAM_COLOR, count: 86, blurb: 'Páteřní a nostalgické linky' },
+        { label: 'Tramvaje', color: TRAM_COLOR, count: TRAM_LINES.length, blurb: '35 páteřních, denních i nočních linek PID + linka 42' },
         { label: 'Přívozy', color: FERRY_COLOR, count: 5, blurb: 'Přívozy přes Vltavu P1–P6' },
       ],
     };
