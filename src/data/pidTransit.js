@@ -138,6 +138,7 @@ let _visibleCount = 0;
 const _scratchCartesian = new Cesium.Cartesian3();
 const _scratchWinCoord = new Cesium.Cartesian2();
 const _scratchCamDirVec = new Cesium.Cartesian3();
+const _occupiedCellsSet = new Set();
 
 // Helper to compute bearing between two coords
 function calculateBearing(lat1, lon1, lat2, lon2) {
@@ -493,11 +494,10 @@ function syncGolemioFeatures(features) {
         else if (type === 'bus') icon = ICONS.bus;
 
         vehicle.billboard = _billboardCollection.add({
-          position: Cesium.Cartesian3.fromDegrees(lon, lat, PRAGUE_SURFACE_ALT + 2.0),
+          position: Cesium.Cartesian3.fromDegrees(lon, lat, (vehicle.alt || PRAGUE_SURFACE_ALT) + 2.5),
           image: icon,
           width: 28,
           height: 28,
-          heightReference: Cesium.HeightReference ? Cesium.HeightReference.CLAMP_TO_GROUND : undefined,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
           scaleByDistance: new Cesium.NearFarScalar(300, 1.2, 35000, 0.5),
           id: vehicle.id,
@@ -548,13 +548,14 @@ function buildStaticTrackPolylines(viewer) {
     // 2. Tram corridors (draped on surface across 3D tiles and 2D terrain)
     TRAM_LINES.forEach((tram) => {
       const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
-      const positions = coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt || PRAGUE_SURFACE_ALT));
+      const positions = coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, (s.alt || PRAGUE_SURFACE_ALT) + 2.0));
       const ent = viewer.entities.add({
         id: `pid-track-tram-${tram.line}`,
         polyline: {
           positions,
           width: tram.scenic ? 4.5 : (tram.night ? 2.5 : 3.2),
           material: Cesium.Color.fromCssColorString(tram.color).withAlpha(tram.scenic ? 0.92 : (tram.night ? 0.75 : 0.85)),
+          depthFailMaterial: Cesium.Color.fromCssColorString(tram.color).withAlpha(tram.scenic ? 0.6 : (tram.night ? 0.4 : 0.5)),
           clampToGround: true,
           classificationType: Cesium.ClassificationType ? Cesium.ClassificationType.BOTH : undefined,
           arcType: Cesium.ArcType ? Cesium.ArcType.GEODESIC : undefined,
@@ -595,7 +596,7 @@ function buildStaticTrackPolylines(viewer) {
     TRAM_LINES.forEach((tram) => {
       const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
       polylines.add({
-        positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt || PRAGUE_SURFACE_ALT)),
+        positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, (s.alt || PRAGUE_SURFACE_ALT) + 2.0)),
         width: tram.scenic ? 4.0 : (tram.night ? 2.2 : 2.8),
         material: Cesium.Material.fromType('Color', {
           color: Cesium.Color.fromCssColorString(tram.color).withAlpha(tram.scenic ? 0.9 : 0.75),
@@ -675,11 +676,10 @@ function buildBillboardCollections(viewer) {
     }
 
     const bb = billboards.add({
-      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, (v.alt || PRAGUE_SURFACE_ALT) + 2.0),
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, (v.alt || PRAGUE_SURFACE_ALT) + 2.5),
       image: icon,
       width: 28,
       height: 28,
-      heightReference: Cesium.HeightReference ? Cesium.HeightReference.CLAMP_TO_GROUND : undefined,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
       scaleByDistance: new Cesium.NearFarScalar(300, 1.2, 35000, 0.5),
       id: v.id,
@@ -796,24 +796,27 @@ export function updateVehiclesVisibilityAndPositions(viewer) {
   }
 
   const minScreenCellPx = calculateZoomDensityCellSize(cameraHeight);
-  const occupiedCells = minScreenCellPx > 0 ? new Set() : null;
+  const occupiedCells = minScreenCellPx > 0 ? _occupiedCellsSet : null;
+  if (occupiedCells) occupiedCells.clear();
   const keyholeRadiusSq = keyholeRadius * keyholeRadius;
   const camPosWC = camera?.positionWC;
   const camDirWC = camera?.directionWC;
 
   let visibleCount = 0;
 
-  for (const v of _vehicles) {
+  for (let i = 0; i < _vehicles.length; i++) {
+    const v = _vehicles[i];
     if (!v.billboard) continue;
 
     // 1. Update billboard 3D position
-    const pos = Cesium.Cartesian3.fromDegrees(
+    Cesium.Cartesian3.fromDegrees(
       v.lon,
       v.lat,
-      (v.alt || PRAGUE_SURFACE_ALT) + 2.0,
+      (v.alt || PRAGUE_SURFACE_ALT) + 2.5,
+      undefined,
       _scratchCartesian,
     );
-    v.billboard.position = pos;
+    v.billboard.position = _scratchCartesian;
 
     // 2. Base category filter ('all' | 'metro' | 'tram')
     if (_filter === 'metro' && v.type !== 'metro') {
@@ -841,8 +844,8 @@ export function updateVehiclesVisibilityAndPositions(viewer) {
 
     // 4. Frustum culling / behind camera check
     if (camPosWC && camDirWC) {
-      const toPt = Cesium.Cartesian3.subtract(pos, camPosWC, _scratchCamDirVec);
-      const dot = Cesium.Cartesian3.dot(camDirWC, toPt);
+      Cesium.Cartesian3.subtract(_scratchCartesian, camPosWC, _scratchCamDirVec);
+      const dot = Cesium.Cartesian3.dot(camDirWC, _scratchCamDirVec);
       if (dot <= 0) {
         v.billboard.show = false;
         continue;
@@ -850,7 +853,7 @@ export function updateVehiclesVisibilityAndPositions(viewer) {
     }
 
     // 5. Screen projection
-    const winCoord = Cesium.SceneTransforms.wgs84ToWindowCoordinates(scene, pos, _scratchWinCoord);
+    const winCoord = Cesium.SceneTransforms.wgs84ToWindowCoordinates(scene, _scratchCartesian, _scratchWinCoord);
     if (!winCoord) {
       v.billboard.show = false;
       continue;
@@ -877,7 +880,7 @@ export function updateVehiclesVisibilityAndPositions(viewer) {
 
       const cellX = Math.floor(winCoord.x / minScreenCellPx);
       const cellY = Math.floor(winCoord.y / minScreenCellPx);
-      const cellKey = `${cellX}:${cellY}`;
+      const cellKey = (cellX * 73856093) ^ (cellY * 19349663);
 
       if (occupiedCells.has(cellKey)) {
         v.billboard.show = false;
@@ -900,19 +903,39 @@ export function updateVehiclesVisibilityAndPositions(viewer) {
 function startAnimationLoop(viewer) {
   if (typeof requestAnimationFrame !== 'function') return;
   let lastTime = performance.now();
+  let lastLODTime = 0;
 
   function onFrame(now) {
     if (!_enabled) return;
     const dt = Math.min((now - lastTime) / 1000, 0.1);
     lastTime = now;
 
-    // Step physics / track progress
+    // Step physics / track progress (60 FPS smooth motion)
     updateFleetMotion(dt);
 
-    // Update Cesium billboards on surface with circle culling and zoom density LOD
-    updateVehiclesVisibilityAndPositions(viewer);
+    // Throttle screen projection / keyhole circle / LOD cell decimation to ~10 Hz (every 100ms)
+    // while moving visible billboards smoothly at 60 FPS
+    if (now - lastLODTime >= 100) {
+      lastLODTime = now;
+      updateVehiclesVisibilityAndPositions(viewer);
+    } else {
+      const vLen = _vehicles.length;
+      for (let i = 0; i < vLen; i++) {
+        const v = _vehicles[i];
+        if (v.billboard && v.billboard.show) {
+          Cesium.Cartesian3.fromDegrees(
+            v.lon,
+            v.lat,
+            (v.alt || PRAGUE_SURFACE_ALT) + 2.5,
+            undefined,
+            _scratchCartesian,
+          );
+          v.billboard.position = _scratchCartesian;
+        }
+      }
+    }
 
-    // Update close-zoom 3D Tatra T3 models
+    // Update close-zoom 3D Tatra T3 models (fast distance gated)
     updateTramModels(viewer, _vehicles);
 
     // If a vehicle is currently tracked in Cockpit View, sync camera

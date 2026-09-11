@@ -24,6 +24,8 @@ const _tramModels = new Map();
 let _viewer = null;
 let _enabled = false;
 const _scratchHpr = new Cesium.HeadingPitchRoll();
+const _scratchApproxPos = new Cesium.Cartesian3();
+const _scratchTramPos = new Cesium.Cartesian3();
 
 /**
  * Helper to compute bearing between two points
@@ -62,7 +64,14 @@ export function snapTramToTrack(lat, lon, bearing, vehicle) {
   const maxSearchDistM = 90; // Snap within 90m corridor
   const maxSearchDistSq = maxSearchDistM * maxSearchDistM;
 
-  for (let i = 0; i < path.length - 1; i++) {
+  let startIdx = 0;
+  let endIdx = path.length - 1;
+  if (typeof vehicle?.currentNodeIndex === 'number') {
+    startIdx = Math.max(0, vehicle.currentNodeIndex - 3);
+    endIdx = Math.min(path.length - 1, vehicle.currentNodeIndex + 5);
+  }
+
+  for (let i = startIdx; i < endIdx; i++) {
     const p1 = path[i];
     const p2 = path[i + 1];
     const dx = (p2.lon - p1.lon) * K_LON;
@@ -170,23 +179,39 @@ export function updateTramModels(viewer, vehicles) {
 
   const currentTramIds = new Set();
 
-  for (const v of vehicles) {
+  for (let i = 0; i < vehicles.length; i++) {
+    const v = vehicles[i];
     if (v.type !== 'tram' || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) continue;
     currentTramIds.add(v.id);
 
-    // 1. Snap to track vector
-    const snapped = snapTramToTrack(v.lat, v.lon, v.bearing || 0, v);
-
-    // 2. Position model on track vector at ground elevation
-    const alt = (snapped.alt ?? 220.0) + 0.1;
-    const tramPos = Cesium.Cartesian3.fromDegrees(snapped.lon, snapped.lat, alt);
-    const dist = Cesium.Cartesian3.distance(cameraPos, tramPos);
-
     let entry = _tramModels.get(v.id);
     const wasActive = entry?.active ?? false;
+
+    // Fast distance check before any expensive track snapping or allocations
+    Cesium.Cartesian3.fromDegrees(
+      v.lon,
+      v.lat,
+      v.alt || 220.0,
+      undefined,
+      _scratchApproxPos,
+    );
+    const dist = Cesium.Cartesian3.distance(cameraPos, _scratchApproxPos);
     const shouldBeActive = wasActive ? (dist < MODEL_EXIT_DIST_M) : (dist < MODEL_ENTER_DIST_M);
 
+    if (!shouldBeActive && !wasActive) {
+      // Vehicle is far from camera and wasn't active: skip immediately!
+      // Do not snap to track, do not allocate, and do not touch billboard visibility!
+      continue;
+    }
+
     if (shouldBeActive) {
+      // 1. Snap to track vector
+      const snapped = snapTramToTrack(v.lat, v.lon, v.bearing || 0, v);
+
+      // 2. Position model on track vector at true ground elevation
+      const alt = (snapped.alt ?? 220.0) + 0.1;
+      Cesium.Cartesian3.fromDegrees(snapped.lon, snapped.lat, alt, undefined, _scratchTramPos);
+
       if (!entry) {
         entry = { model: null, active: true, loading: true };
         _tramModels.set(v.id, entry);
@@ -197,7 +222,6 @@ export function updateTramModels(viewer, vehicles) {
             url: TRAM_MODEL_URL,
             asynchronous: false,
             scale: 1.0,
-            heightReference: Cesium.HeightReference ? Cesium.HeightReference.CLAMP_TO_GROUND : undefined,
             scene: viewer.scene,
             id: `pid-3d-${v.id}`,
           }).then((model) => {
@@ -208,7 +232,7 @@ export function updateTramModels(viewer, vehicles) {
             entry.model = model;
             entry.loading = false;
             // Position and orient along track vector
-            computeTramModelMatrix(tramPos, snapped.bearing, model.modelMatrix);
+            computeTramModelMatrix(_scratchTramPos, snapped.bearing, model.modelMatrix);
             viewer.scene?.primitives?.add(model);
           }).catch((err) => {
             console.warn('[PID Tram 3D] Failed to load 3D tram model:', err);
@@ -221,7 +245,7 @@ export function updateTramModels(viewer, vehicles) {
 
       if (entry.model) {
         entry.model.show = true;
-        computeTramModelMatrix(tramPos, snapped.bearing, entry.model.modelMatrix);
+        computeTramModelMatrix(_scratchTramPos, snapped.bearing, entry.model.modelMatrix);
       }
 
       // Hide the 2D billboard so it doesn't clash with the 3D model
@@ -245,8 +269,8 @@ export function updateTramModels(viewer, vehicles) {
         }
       }
 
-      // Restore 2D billboard visibility when outside 3D threshold
-      if (v.billboard && !v.hiddenByFilter) {
+      // Restore 2D billboard visibility ONLY if it was previously hidden by active 3D model
+      if (v.billboard && wasActive) {
         v.billboard.show = true;
       }
     }
