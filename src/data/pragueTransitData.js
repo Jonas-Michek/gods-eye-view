@@ -8,6 +8,8 @@
  * - Major transfer hubs & stations with depth/elevation metadata
  */
 
+import { TRAM_TRACK_PATHS } from './pragueTramTracks.js';
+
 export const PRAGUE_BOUNDS = Object.freeze({
   southwest: { lat: 49.95, lon: 14.20 },
   northeast: { lat: 50.20, lon: 14.75 },
@@ -146,6 +148,7 @@ export const TRAM_LINES = Object.freeze([
     color: TRAM_COLOR,
     scenic: true,
     description: 'Nejznámější a nejkrásnější tramvajová trasa Prahou kolem Hradčan, Malé Strany a přes Vltavu.',
+    path: TRAM_TRACK_PATHS['22'],
     stops: [
       { name: 'Bílá Hora', lat: 50.0768, lon: 14.3235 },
       { name: 'Malovanka', lat: 50.0847, lon: 14.3812 },
@@ -183,6 +186,7 @@ export const TRAM_LINES = Object.freeze([
     color: TRAM_COLOR,
     scenic: false,
     description: 'Páteřní západovýchodní tramvajová tepna přes Anděl, Národní třídu a Václavské náměstí.',
+    path: TRAM_TRACK_PATHS['9'],
     stops: [
       { name: 'Sídliště Řepy', lat: 50.0658, lon: 14.3055 },
       { name: 'Kotlářka', lat: 50.0695, lon: 14.3615 },
@@ -213,6 +217,7 @@ export const TRAM_LINES = Object.freeze([
     color: TRAM_COLOR,
     scenic: true,
     description: 'Pobřežní trasa podél Vltavy, pod Vyšehradem, kolem Národního divadla a pod Letnou.',
+    path: TRAM_TRACK_PATHS['17'],
     stops: [
       { name: 'Sídliště Modřany (Levského)', lat: 50.0035, lon: 14.4255 },
       { name: 'Nádraží Braník', lat: 50.0295, lon: 14.4085 },
@@ -241,6 +246,7 @@ export const TRAM_LINES = Object.freeze([
     scenic: true,
     historical: true,
     description: 'Vyhlídková okružní linka historickými vozy Tatra T1, T2, T3 a vozy z Rakousko-Uherska.',
+    path: TRAM_TRACK_PATHS['42'],
     stops: [
       { name: 'Dlabačov', lat: 50.0852, lon: 14.3785 },
       { name: 'Pohořelec', lat: 50.0872, lon: 14.3888 },

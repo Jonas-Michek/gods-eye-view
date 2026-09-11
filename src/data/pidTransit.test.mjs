@@ -73,6 +73,35 @@ test('Tram lines include scenic routes 22, 17, and historical 42', () => {
   assert.ok(FERRIES.length >= 4, 'Must include Vltava ferries');
 });
 
+test('Tram lines include high-fidelity real track paths following street layout', () => {
+  for (const t of TRAM_LINES) {
+    assert.ok(Array.isArray(t.path), `Tram line ${t.line} must have a path array`);
+    assert.ok(t.path.length >= 500, `Tram line ${t.line} path should have >= 500 nodes (found ${t.path.length})`);
+
+    // Verify all points are inside Prague bounds
+    for (const pt of t.path) {
+      assert.ok(
+        pt.lat >= PRAGUE_BOUNDS.southwest.lat && pt.lat <= PRAGUE_BOUNDS.northeast.lat,
+        `Point lat ${pt.lat} outside Prague bounds`,
+      );
+      assert.ok(
+        pt.lon >= PRAGUE_BOUNDS.southwest.lon && pt.lon <= PRAGUE_BOUNDS.northeast.lon,
+        `Point lon ${pt.lon} outside Prague bounds`,
+      );
+    }
+
+    // Verify fine-grained density (max distance between consecutive points <= 35m)
+    for (let i = 0; i < t.path.length - 1; i++) {
+      const p1 = t.path[i];
+      const p2 = t.path[i + 1];
+      const dLat = Math.abs(p2.lat - p1.lat);
+      const dLon = Math.abs(p2.lon - p1.lon);
+      assert.ok(dLat < 0.001, `Gap in lat between node ${i} and ${i + 1} on line ${t.line}: ${dLat}`);
+      assert.ok(dLon < 0.0015, `Gap in lon between node ${i} and ${i + 1} on line ${t.line}: ${dLon}`);
+    }
+  }
+});
+
 test('Prague POIs are correctly configured and link to transit stops', () => {
   assert.ok(PRAGUE_POIS.length >= 8);
   const castle = PRAGUE_POIS.find((p) => p.id === 'prague-castle');

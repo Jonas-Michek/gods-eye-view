@@ -150,6 +150,42 @@ function haversineDistanceM(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Prepare fine-grained track nodes with annotated upcoming stops for smooth animation.
+ */
+function prepareRouteNodes(rawPath, stops) {
+  if (!rawPath || rawPath.length === 0) {
+    return (stops || []).map((s) => ({ ...s }));
+  }
+
+  const nodes = rawPath.map((p) => ({ lat: p.lat, lon: p.lon }));
+
+  if (stops && stops.length > 0) {
+    for (const stop of stops) {
+      let bestDist = Infinity;
+      let bestIdx = 0;
+      for (let i = 0; i < nodes.length; i++) {
+        const d = haversineDistanceM(nodes[i].lat, nodes[i].lon, stop.lat, stop.lon);
+        if (d < bestDist) {
+          bestDist = d;
+          bestIdx = i;
+        }
+      }
+      nodes[bestIdx].name = stop.name;
+    }
+  }
+
+  let upcomingStop = stops && stops.length > 0 ? stops[stops.length - 1].name : '';
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    if (nodes[i].name) {
+      upcomingStop = nodes[i].name;
+    }
+    nodes[i].nextStop = upcomingStop;
+  }
+
+  return nodes;
+}
+
+/**
  * Generate initial fleet of simulated vehicles across Prague routes
  */
 function createInitialFleet() {
@@ -191,27 +227,34 @@ function createInitialFleet() {
     const count = 3; // 3 trams per key route
     for (let i = 0; i < count; i++) {
       const forward = i % 2 === 0;
-      const stops = forward ? [...tramRoute.stops] : [...tramRoute.stops].reverse();
-      const startIdx = Math.floor((i / count) * (stops.length - 2));
+      const rawPath = tramRoute.path && tramRoute.path.length > 0 ? tramRoute.path : tramRoute.stops;
+      const orderedPath = forward ? rawPath : [...rawPath].reverse();
+      const orderedStops = forward ? tramRoute.stops : [...tramRoute.stops].reverse();
+      const nodes = prepareRouteNodes(orderedPath, orderedStops);
+
+      const startIdx = Math.floor(((i + 0.25) / count) * Math.max(1, nodes.length - 2));
+      const direction = orderedStops[orderedStops.length - 1].name;
+      const initialNextStop = nodes[startIdx + 1]?.nextStop || nodes[startIdx + 1]?.name || direction;
+
       fleet.push({
         id: `pid-tram-${tramRoute.line}-${i + 1}`,
         type: 'tram',
         line: tramRoute.line,
         lineName: `Tram ${tramRoute.line}`,
-        direction: stops[stops.length - 1].name,
-        routeNodes: stops,
+        direction,
+        routeNodes: nodes,
         currentNodeIndex: startIdx,
         progress: Math.random() * 0.8,
         speedMps: 9, // ~32 km/h
-        lat: stops[startIdx].lat,
-        lon: stops[startIdx].lon,
+        lat: nodes[startIdx].lat,
+        lon: nodes[startIdx].lon,
         depth: 0,
         bearing: 0,
         delayMin: (Math.random() * 3.5).toFixed(1),
         fleetNumber: tramRoute.historical ? `Tatra T3 #${6100 + i}` : `Škoda 15T #${9250 + i}`,
         wheelchair: !tramRoute.historical,
         airConditioned: !tramRoute.historical,
-        nextStop: stops[startIdx + 1]?.name || stops[stops.length - 1].name,
+        nextStop: initialNextStop,
       });
     }
   });
@@ -277,15 +320,17 @@ function createInitialFleet() {
 function updateFleetMotion(dtSec = 0.05) {
   for (const v of _vehicles) {
     if (!v.routeNodes || v.routeNodes.length < 2) continue;
-    const fromNode = v.routeNodes[v.currentNodeIndex];
-    const toNode = v.routeNodes[v.currentNodeIndex + 1];
+    let fromNode = v.routeNodes[v.currentNodeIndex];
+    let toNode = v.routeNodes[v.currentNodeIndex + 1];
 
     if (!fromNode || !toNode) {
       // Reverse route or wrap
       v.routeNodes.reverse();
       v.currentNodeIndex = 0;
       v.progress = 0;
-      continue;
+      fromNode = v.routeNodes[0];
+      toNode = v.routeNodes[1];
+      if (!fromNode || !toNode) continue;
     }
 
     const legDist = haversineDistanceM(fromNode.lat, fromNode.lon, toNode.lat, toNode.lon);
@@ -294,14 +339,22 @@ function updateFleetMotion(dtSec = 0.05) {
 
     v.progress += progressInc;
 
-    if (v.progress >= 1.0) {
-      v.progress = 0;
+    while (v.progress >= 1.0) {
+      v.progress -= 1.0;
       v.currentNodeIndex++;
       if (v.currentNodeIndex >= v.routeNodes.length - 1) {
         v.routeNodes.reverse();
         v.currentNodeIndex = 0;
+        // Re-compute upcoming stop in the new direction
+        let upcomingStop = v.routeNodes[v.routeNodes.length - 1]?.name || v.direction;
+        for (let k = v.routeNodes.length - 1; k >= 0; k--) {
+          if (v.routeNodes[k].name) upcomingStop = v.routeNodes[k].name;
+          v.routeNodes[k].nextStop = upcomingStop;
+        }
+        const lastNode = v.routeNodes[v.routeNodes.length - 1];
+        if (lastNode?.name) v.direction = lastNode.name;
+        break;
       }
-      v.nextStop = v.routeNodes[v.currentNodeIndex + 1]?.name || v.direction;
     }
 
     const currFrom = v.routeNodes[v.currentNodeIndex];
@@ -310,6 +363,7 @@ function updateFleetMotion(dtSec = 0.05) {
       v.lat = currFrom.lat + (currTo.lat - currFrom.lat) * v.progress;
       v.lon = currFrom.lon + (currTo.lon - currFrom.lon) * v.progress;
       v.bearing = calculateBearing(currFrom.lat, currFrom.lon, currTo.lat, currTo.lon);
+      v.nextStop = currTo.nextStop || currTo.name || v.direction;
     }
   }
 }
@@ -407,7 +461,8 @@ function buildStaticTrackPolylines(viewer) {
 
     // 2. Tram corridors
     TRAM_LINES.forEach((tram) => {
-      const positions = tram.stops.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0));
+      const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
+      const positions = coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0));
       const ent = viewer.entities.add({
         id: `pid-track-tram-${tram.line}`,
         polyline: {
@@ -451,8 +506,9 @@ function buildStaticTrackPolylines(viewer) {
       });
     });
     TRAM_LINES.forEach((tram) => {
+      const coords = (tram.path && tram.path.length > 0) ? tram.path : tram.stops;
       polylines.add({
-        positions: tram.stops.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0)),
+        positions: coords.map((s) => Cesium.Cartesian3.fromDegrees(s.lon, s.lat, PRAGUE_SURFACE_ALT + 2.0)),
         width: 3.5,
         material: Cesium.Material.fromType('Color', {
           color: Cesium.Color.fromCssColorString(tram.color).withAlpha(0.85),
