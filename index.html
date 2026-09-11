@@ -370,7 +370,7 @@
         <select id="hud-layout-select" class="pp-select" aria-label="HUD layout">
           <option value="tactical">Tactical</option>
           <option value="operator">Operator</option>
-          <option value="minimal">Minimal</option>
+          <option value="minimal" selected>Minimal</option>
         </select>
       </div>
     </div>
@@ -479,6 +479,35 @@
 
   <!-- Unified bottom command dock: locations, voice (injected at runtime), visual presets -->
   <div id="command-dock" aria-label="Navigation, voice, and visual preset controls">
+  <!-- Location bar -->
+  <div id="location-bar" class="panel-collapsible collapsed">
+    <div class="panel-glow"></div>
+    <div class="location-inner">
+      <div class="location-toolbar">
+        <span class="location-toolbar-label"><span class="dock-label-icon dock-label-icon-location" aria-hidden="true"></span>LOCATION</span>
+        <button class="panel-collapse-btn" data-collapse-target="location-bar" title="Collapse panel">+</button>
+      </div>
+      <div id="location-mini-status" class="location-mini-status" aria-live="polite">
+        <div id="location-mini-city" class="location-mini-city">📍 Location: --</div>
+        <div id="location-mini-poi" class="location-mini-poi">Landmark: --</div>
+      </div>
+      <div class="dock-popover-content">
+        <button class="dock-pin-btn" data-pin-target="location-bar" type="button" aria-label="Pin location tray" aria-pressed="false" title="Keep location tray open"><img src="/pin.svg" alt="" /></button>
+        <div id="poi-row" class="poi-row-container"></div>
+        <div class="location-bar-divider" id="location-bar-divider"></div>
+        <div class="location-city-row">
+          <div id="location-pills" class="location-pills"></div>
+          <div class="location-search-wrap">
+            <button id="search-toggle" class="search-toggle-btn" title="Search any location">
+              <span>&#x1F50E;</span>
+            </button>
+            <input type="text" id="location-search" placeholder="Search any location..." autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Control panel -->
   <div id="control-panel" class="panel-collapsible collapsed">
     <div class="panel-glow"></div>
@@ -542,35 +571,6 @@
       </div>
     </div>
   </div>
-
-  <!-- Location bar -->
-  <div id="location-bar" class="panel-collapsible collapsed">
-    <div class="panel-glow"></div>
-    <div class="location-inner">
-      <div class="location-toolbar">
-        <span class="location-toolbar-label"><span class="dock-label-icon dock-label-icon-location" aria-hidden="true"></span>LOCATION</span>
-        <button class="panel-collapse-btn" data-collapse-target="location-bar" title="Collapse panel">+</button>
-      </div>
-      <div id="location-mini-status" class="location-mini-status" aria-live="polite">
-        <div id="location-mini-city" class="location-mini-city">📍 Location: --</div>
-        <div id="location-mini-poi" class="location-mini-poi">Landmark: --</div>
-      </div>
-      <div class="dock-popover-content">
-        <button class="dock-pin-btn" data-pin-target="location-bar" type="button" aria-label="Pin location tray" aria-pressed="false" title="Keep location tray open"><img src="/pin.svg" alt="" /></button>
-        <div id="poi-row" class="poi-row-container"></div>
-        <div class="location-bar-divider" id="location-bar-divider"></div>
-        <div class="location-city-row">
-          <div id="location-pills" class="location-pills"></div>
-          <div class="location-search-wrap">
-            <button id="search-toggle" class="search-toggle-btn" title="Search any location">
-              <span>&#x1F50E;</span>
-            </button>
-            <input type="text" id="location-search" placeholder="Search any location..." autocomplete="off" spellcheck="false" />
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
   </div>
 
   <div id="left-panel-stack">
@@ -587,61 +587,7 @@
     </div>
   </div>
 
-  <!-- CCTV Coverage Panel -->
-  <div id="cctv-panel" class="panel-collapsible collapsed" data-panel-id="cctv-panel">
-    <div class="panel-glow"></div>
-    <div class="cctv-panel-inner">
-      <div class="panel-header">
-        <span class="panel-title">CCTV</span>
-        <span class="panel-divider"></span>
-        <button class="panel-collapse-btn" data-collapse-target="cctv-panel" title="Collapse panel">+</button>
-      </div>
-      <div id="cctv-frame-wrap" class="cctv-frame-wrap">
-        <img id="cctv-frame" alt="CCTV feed frame" />
-      </div>
-      <div id="cctv-source-badge" role="status" aria-live="polite">SOURCE · UNKNOWN</div>
-      <div id="cctv-meta">Enable CCTV to load camera intersections</div>
-      <div class="cctv-controls">
-        <button id="cctv-enable-btn" class="scene-btn">CCTV OFF</button>
-        <button id="cctv-nearest-btn" class="scene-btn">NEAREST</button>
-      </div>
-      <div class="cctv-controls">
-        <button id="cctv-prev-btn" class="scene-btn">PREV</button>
-        <select id="cctv-camera-select" aria-label="CCTV camera"></select>
-        <button id="cctv-next-btn" class="scene-btn">NEXT</button>
-      </div>
-      <div class="cctv-controls">
-        <button id="cctv-focus-btn" class="scene-btn">FOCUS</button>
-        <button id="cctv-coverage-btn" class="scene-btn">COVERAGE OFF</button>
-        <button id="cctv-auto-hop-btn" class="scene-btn">AUTO HOP OFF</button>
-      </div>
-      <div class="cctv-controls">
-        <button id="cctv-projection-btn" class="scene-btn">PROJECTION ON</button>
-        <span id="cctv-quality-chip">CAL · --</span>
-      </div>
-      <div class="cctv-calibration-block">
-        <div class="cctv-calibration-header">
-          <div class="cctv-summary-label">CALIBRATION</div>
-          <button id="cctv-adjust-btn" class="scene-btn" title="Drag the camera in the world: rings rotate, arrows move, handles set range/FOV">ADJUST</button>
-        </div>
-        <div id="cctv-cal-readout" class="cctv-cal-readout" aria-label="Camera pose — click a value to type">
-          <button class="cctv-cal-value" data-cal-field="heading" title="Heading (compass °) — click to type">HDG --</button>
-          <button class="cctv-cal-value" data-cal-field="pitch" title="Pitch (° up/down) — click to type">PITCH --</button>
-          <button class="cctv-cal-value" data-cal-field="fov" title="Horizontal FOV (°) — click to type">FOV --</button>
-          <button class="cctv-cal-value" data-cal-field="range" title="Range / monitor-plane distance (m) — click to type">RANGE --</button>
-          <button class="cctv-cal-value" data-cal-field="height" title="Mount height above ground (m) — click to type">HGT --</button>
-          <button class="cctv-cal-value" data-cal-field="north" title="North offset from catalog position (m) — click to type">ΔN --</button>
-          <button class="cctv-cal-value" data-cal-field="east" title="East offset from catalog position (m) — click to type">ΔE --</button>
-        </div>
-        <div class="cctv-controls cctv-calibration-actions">
-          <button id="cctv-calib-save-btn" class="scene-btn">SAVE CAL</button>
-          <button id="cctv-calib-reset-btn" class="scene-btn">RESET CAL</button>
-        </div>
-      </div>
-      <div class="cctv-summary-label">SCENE SUMMARY</div>
-      <div id="cctv-summary">Enable CCTV to start camera-linked intelligence summaries.</div>
-    </div>
-  </div>
+
 
   <!-- Scene Director Panel -->
   <div id="scene-panel" class="panel-collapsible collapsed" data-panel-id="scene-panel">
@@ -690,7 +636,7 @@
         <div class="panel-header">
           <span class="panel-title">CONTEXT</span>
           <span class="panel-divider"></span>
-          <div id="context-radio-dock" class="context-radio-dock">
+          <div id="context-radio-dock" class="context-radio-dock" style="display: none !important;" hidden aria-hidden="true">
             <button id="context-radio-toggle-btn" class="context-radio-toggle" type="button" aria-expanded="false" aria-controls="context-radio-mini" aria-label="Open compact Radio controls" title="Open compact Radio controls">
               <span class="material-symbols-outlined" aria-hidden="true">radio</span>
             </button>
@@ -735,10 +681,14 @@
             <span class="material-symbols-outlined" aria-hidden="true">tram</span>
             <span>PID PRAHA</span>
           </button>
+          <button id="global-context-cd-btn" class="context-mode-button" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="context-cd-view" aria-label="VLAKY ČD" title="České dráhy — vyhledávání spojení, live zpoždění a 3D kolejové trasy">
+            <span class="material-symbols-outlined" aria-hidden="true">train</span>
+            <span>VLAKY ČD</span>
+          </button>
         </div>
         <div id="context-mode-standby" class="context-mode-standby">
           <strong>SELECT CONTEXT</strong>
-          <span>CONTACTS — nearest planes · vessels · sites<br>SPACE MISSIONS — launches &amp; orbital assets<br>PID PRAHA — live transit &amp; radar</span>
+          <span>CONTACTS — nearest planes · vessels · sites<br>SPACE MISSIONS — launches &amp; orbital assets<br>PID PRAHA — live transit &amp; radar<br>VLAKY ČD — trasy spojů &amp; reálné koleje</span>
         </div>
         <section id="context-flights-view" class="context-mode-view" role="tabpanel" aria-labelledby="global-context-flights-btn" hidden>
           <div class="global-context-actions" aria-label="Contact Context actions">
@@ -863,6 +813,60 @@
             </div>
           </div>
         </section>
+        <!-- CCTV Coverage Section -->
+        <section id="cctv-panel" class="panel-collapsible collapsed" data-panel-id="cctv-panel" aria-label="CCTV coverage">
+          <div class="cctv-panel-inner">
+            <div class="panel-header">
+              <span class="panel-title">CCTV</span>
+              <span class="panel-divider"></span>
+              <button class="panel-collapse-btn" data-collapse-target="cctv-panel" title="Collapse panel">+</button>
+            </div>
+            <div id="cctv-frame-wrap" class="cctv-frame-wrap">
+              <img id="cctv-frame" alt="CCTV feed frame" />
+            </div>
+            <div id="cctv-source-badge" role="status" aria-live="polite">SOURCE · UNKNOWN</div>
+            <div id="cctv-meta">Enable CCTV to load camera intersections</div>
+            <div class="cctv-controls">
+              <button id="cctv-enable-btn" class="scene-btn">CCTV OFF</button>
+              <button id="cctv-nearest-btn" class="scene-btn">NEAREST</button>
+            </div>
+            <div class="cctv-controls">
+              <button id="cctv-prev-btn" class="scene-btn">PREV</button>
+              <select id="cctv-camera-select" aria-label="CCTV camera"></select>
+              <button id="cctv-next-btn" class="scene-btn">NEXT</button>
+            </div>
+            <div class="cctv-controls">
+              <button id="cctv-focus-btn" class="scene-btn">FOCUS</button>
+              <button id="cctv-coverage-btn" class="scene-btn">COVERAGE OFF</button>
+              <button id="cctv-auto-hop-btn" class="scene-btn">AUTO HOP OFF</button>
+            </div>
+            <div class="cctv-controls">
+              <button id="cctv-projection-btn" class="scene-btn">PROJECTION ON</button>
+              <span id="cctv-quality-chip">CAL · --</span>
+            </div>
+            <div class="cctv-calibration-block">
+              <div class="cctv-calibration-header">
+                <div class="cctv-summary-label">CALIBRATION</div>
+                <button id="cctv-adjust-btn" class="scene-btn" title="Drag the camera in the world: rings rotate, arrows move, handles set range/FOV">ADJUST</button>
+              </div>
+              <div id="cctv-cal-readout" class="cctv-cal-readout" aria-label="Camera pose — click a value to type">
+                <button class="cctv-cal-value" data-cal-field="heading" title="Heading (compass °) — click to type">HDG --</button>
+                <button class="cctv-cal-value" data-cal-field="pitch" title="Pitch (° up/down) — click to type">PITCH --</button>
+                <button class="cctv-cal-value" data-cal-field="fov" title="Horizontal FOV (°) — click to type">FOV --</button>
+                <button class="cctv-cal-value" data-cal-field="range" title="Range / monitor-plane distance (m) — click to type">RANGE --</button>
+                <button class="cctv-cal-value" data-cal-field="height" title="Mount height above ground (m) — click to type">HGT --</button>
+                <button class="cctv-cal-value" data-cal-field="north" title="North offset from catalog position (m) — click to type">ΔN --</button>
+                <button class="cctv-cal-value" data-cal-field="east" title="East offset from catalog position (m) — click to type">ΔE --</button>
+              </div>
+              <div class="cctv-controls cctv-calibration-actions">
+                <button id="cctv-calib-save-btn" class="scene-btn">SAVE CAL</button>
+                <button id="cctv-calib-reset-btn" class="scene-btn">RESET CAL</button>
+              </div>
+            </div>
+            <div class="cctv-summary-label">SCENE SUMMARY</div>
+            <div id="cctv-summary">Enable CCTV to start camera-linked intelligence summaries.</div>
+          </div>
+        </section>
         <section id="radio-panel" class="panel-collapsible collapsed" data-panel-id="radio-panel" aria-label="Internet radio companion">
           <div class="radio-panel-inner">
             <div class="panel-header">
@@ -974,7 +978,7 @@
     </div>
     <!-- Kept out of the footer row: it swaps to mission progress and errors, and
          a live region that also holds layout makes the row jump as it speaks. -->
-    <p class="first-run-note" data-first-run-status role="status" aria-live="polite">Tip: the GEV MIC button in the dock lets you talk to the map.</p>
+    <p class="first-run-note" data-first-run-status role="status" aria-live="polite">Tip: explore live contacts, space missions, or search any location.</p>
   </aside>
 
   <!-- POWER UP — in-app key setup. Dev-server only: src/keySetup.js removes

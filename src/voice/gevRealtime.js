@@ -2550,6 +2550,9 @@ function createVoiceControl({ reset = false } = {}) {
     root.id = 'gev-voice-control';
     root.dataset.status = 'idle';
     root.dataset.speaker = 'idle';
+    root.style.display = 'none';
+    root.hidden = true;
+    root.setAttribute('aria-hidden', 'true');
     root.innerHTML = `
       <div class="gev-voice-heading">
         <div class="gev-voice-kicker">AI AGENT</div>

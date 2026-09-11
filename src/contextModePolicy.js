@@ -2,6 +2,7 @@ const CONTEXT_DEPENDENCIES = Object.freeze({
   flights: new Set(['military-awareness', 'flights', 'military', 'ais-live-vessels', 'military-installations']),
   'space-missions': new Set(['rocket-launches', 'satellites']),
   pid: new Set(['pid-transit']),
+  cd: new Set(['cd-trains']),
 });
 const CONTEXT_COMPANIONS = new Set(['radio']);
 /** Return whether an origin represents a direct user choice on this route. */

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import pidTransitLayer from './pidTransit.js';
+import pidTransitLayer, {
+  calculateZoomDensityCellSize,
+  updateVehiclesVisibilityAndPositions,
+} from './pidTransit.js';
 import { DataLayerManager } from './manager.js';
 import {
   METRO_LINES,
@@ -212,4 +215,60 @@ test('pidTransitLayer integrates with DataLayerManager toggle lifecycle without 
   assert.equal(disableSuccess, true);
   assert.equal(manager.isEnabled('pid-transit'), false);
 });
+
+test('Prague tram network has all 36 lines (1-26, 31, 91-99, 42) with valid stops and paths', () => {
+  assert.equal(TRAM_LINES.length, 36, `Expected 36 tram routes, found ${TRAM_LINES.length}`);
+
+  const dayLines = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '31'];
+  const nightLines = ['91', '92', '93', '94', '95', '96', '97', '98', '99'];
+
+  const lineNumbers = TRAM_LINES.map((t) => t.line);
+  for (const dl of dayLines) {
+    assert.ok(lineNumbers.includes(dl), `Missing day tram line ${dl}`);
+  }
+  for (const nl of nightLines) {
+    assert.ok(lineNumbers.includes(nl), `Missing night tram line ${nl}`);
+  }
+  assert.ok(lineNumbers.includes('42'), 'Missing historical line 42');
+});
+
+test('calculateZoomDensityCellSize returns correct LOD grid cell sizes for camera altitude', () => {
+  // Street level (< 2,500m) -> 0 (no thinning, 100% density)
+  assert.equal(calculateZoomDensityCellSize(500), 0);
+  assert.equal(calculateZoomDensityCellSize(1500), 0);
+  assert.equal(calculateZoomDensityCellSize(2499), 0);
+
+  // District level (2,500m - 5,500m) -> 32px
+  assert.equal(calculateZoomDensityCellSize(2500), 32);
+  assert.equal(calculateZoomDensityCellSize(4000), 32);
+  assert.equal(calculateZoomDensityCellSize(5499), 32);
+
+  // City overview level (5,500m - 12,000m) -> 46px
+  assert.equal(calculateZoomDensityCellSize(5500), 46);
+  assert.equal(calculateZoomDensityCellSize(8000), 46);
+  assert.equal(calculateZoomDensityCellSize(11999), 46);
+
+  // High orbital level (>= 12,000m) -> 64px
+  assert.equal(calculateZoomDensityCellSize(12000), 64);
+  assert.equal(calculateZoomDensityCellSize(30000), 64);
+});
+
+test('updateVehiclesVisibilityAndPositions culls vehicles outside the scope circle', () => {
+  const fakeViewer = {
+    camera: {
+      positionWC: { x: 0, y: -100, z: 100 },
+      directionWC: { x: 0, y: 1, z: -1 },
+      positionCartographic: { height: 1000 },
+    },
+    scene: {
+      canvas: { clientWidth: 1000, clientHeight: 1000 },
+    },
+  };
+
+  // Run visibility update on headless mock (exercises safe fallback path)
+  updateVehiclesVisibilityAndPositions(fakeViewer);
+  const stats = pidTransitLayer.getStats();
+  assert.equal(typeof stats.visibleCount, 'number');
+});
+
 

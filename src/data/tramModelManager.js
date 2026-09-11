@@ -1,24 +1,110 @@
 import * as Cesium from 'cesium';
+import { TRAM_TRACK_PATHS } from './pragueTramTracks.js';
 
 /**
  * @module tramModelManager
  * @description Manages close-zoom 3D Tatra T3 models for Prague Integrated Transport (PID) trams.
  * When camera is within range (~1,200m), trams seamlessly switch from 2D billboards to high-detail
- * 3D Tatra T3 models that follow street track curvature, heading, and elevation.
- *
- * Isolated from fleet generation/fetching so parallel work on tram loading won't collide.
+ * solid red low-poly 3D Tatra T3 models that snap directly to track vector geometries and follow
+ * street curves without being sideways or displaced.
  */
 
 export const TRAM_MODEL_URL = '/models/tatra_t3.glb';
 export const MODEL_ENTER_DIST_M = 1200; // Switch to 3D model below this distance
 export const MODEL_EXIT_DIST_M = 1450;  // Switch back to 2D billboard above this distance (hysteresis)
 export const MODEL_PRUNE_DIST_M = 2500; // Unload model from GPU memory beyond this distance
+export const TRAM_HEADING_OFFSET_DEG = 90; // Rotate 90 deg clockwise to align glTF nose with track tangent
 
-// Map of vehicleId -> { model: Cesium.Model|null, active: boolean, loading: boolean, lastPos: Cartesian3 }
+// Earth projection constants around Prague (lat ~50.08 deg)
+const K_LAT = 111320;
+const K_LON = 71440;
+
+// Map of vehicleId -> { model: Cesium.Model|null, active: boolean, loading: boolean }
 const _tramModels = new Map();
 let _viewer = null;
 let _enabled = false;
 const _scratchHpr = new Cesium.HeadingPitchRoll();
+
+/**
+ * Helper to compute bearing between two points
+ */
+function calculateBearing(lat1, lon1, lat2, lon2) {
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+/**
+ * Snap tram coordinate directly to nearest track polyline vector segment.
+ * Ensures the 3D tram sits precisely on the tracks and aligns with track tangent.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} bearing
+ * @param {Object} vehicle
+ * @returns {{ lat: number, lon: number, alt: number, bearing: number, snapped: boolean }}
+ */
+export function snapTramToTrack(lat, lon, bearing, vehicle) {
+  const path = (vehicle?.routeNodes && vehicle.routeNodes.length >= 2)
+    ? vehicle.routeNodes
+    : (vehicle?.line && TRAM_TRACK_PATHS[vehicle.line] ? TRAM_TRACK_PATHS[vehicle.line] : null);
+
+  if (!path || path.length < 2) {
+    return { lat, lon, alt: vehicle?.alt ?? 220, bearing, snapped: false };
+  }
+
+  let bestDistSq = Infinity;
+  let bestPoint = { lat, lon, alt: path[0].alt || 220 };
+  let bestSegBearing = bearing;
+
+  const maxSearchDistM = 90; // Snap within 90m corridor
+  const maxSearchDistSq = maxSearchDistM * maxSearchDistM;
+
+  for (let i = 0; i < path.length - 1; i++) {
+    const p1 = path[i];
+    const p2 = path[i + 1];
+    const dx = (p2.lon - p1.lon) * K_LON;
+    const dy = (p2.lat - p1.lat) * K_LAT;
+    const segLenSq = dx * dx + dy * dy;
+    if (segLenSq < 0.01) continue;
+
+    const vx = (lon - p1.lon) * K_LON;
+    const vy = (lat - p1.lat) * K_LAT;
+    let t = (vx * dx + vy * dy) / segLenSq;
+    if (t < 0) t = 0;
+    else if (t > 1) t = 1;
+
+    const projX = p1.lon * K_LON + t * dx;
+    const projY = p1.lat * K_LAT + t * dy;
+    const curX = lon * K_LON;
+    const curY = lat * K_LAT;
+    const distSq = (curX - projX) * (curX - projX) + (curY - projY) * (curY - projY);
+
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      const alt1 = p1.alt || 220;
+      const alt2 = p2.alt || 220;
+      bestPoint = {
+        lat: p1.lat + t * (p2.lat - p1.lat),
+        lon: p1.lon + t * (p2.lon - p1.lon),
+        alt: alt1 + t * (alt2 - alt1),
+      };
+      bestSegBearing = calculateBearing(p1.lat, p1.lon, p2.lat, p2.lon);
+    }
+  }
+
+  if (bestDistSq < maxSearchDistSq) {
+    let diff = Math.abs(bearing - bestSegBearing) % 360;
+    if (diff > 180) diff = 360 - diff;
+    const forward = diff < 90;
+    const finalBearing = forward ? bestSegBearing : ((bestSegBearing + 180) % 360);
+    return { ...bestPoint, bearing: finalBearing, snapped: true };
+  }
+
+  return { lat, lon, alt: vehicle?.alt ?? 220, bearing, snapped: false };
+}
 
 /**
  * Initialize 3D tram model manager with the Cesium viewer
@@ -50,14 +136,16 @@ export function getActive3DModelCount() {
 }
 
 /**
- * Compute modelMatrix for vehicle at given position and bearing
+ * Compute modelMatrix for vehicle at given position and bearing.
+ * Applies TRAM_HEADING_OFFSET_DEG to ensure the nose points along the track.
  * @param {Cesium.Cartesian3} position - ECEF world coordinates
- * @param {number} bearingDeg - Bearing in degrees (0 = North, 90 = East)
+ * @param {number} bearingDeg - Track tangent bearing in degrees
  * @param {Cesium.Matrix4} [result] - Output matrix to mutate
  * @returns {Cesium.Matrix4}
  */
 export function computeTramModelMatrix(position, bearingDeg = 0, result = new Cesium.Matrix4()) {
-  const headingRad = Cesium.Math.toRadians(bearingDeg || 0);
+  const correctedHeading = ((bearingDeg || 0) + TRAM_HEADING_OFFSET_DEG) % 360;
+  const headingRad = Cesium.Math.toRadians(correctedHeading);
   _scratchHpr.heading = headingRad;
   _scratchHpr.pitch = 0;
   _scratchHpr.roll = 0;
@@ -86,8 +174,12 @@ export function updateTramModels(viewer, vehicles) {
     if (v.type !== 'tram' || !Number.isFinite(v.lon) || !Number.isFinite(v.lat)) continue;
     currentTramIds.add(v.id);
 
-    const alt = (v.alt ?? 220.0) + 0.1;
-    const tramPos = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, alt);
+    // 1. Snap to track vector
+    const snapped = snapTramToTrack(v.lat, v.lon, v.bearing || 0, v);
+
+    // 2. Position model on track vector at ground elevation
+    const alt = (snapped.alt ?? 220.0) + 0.1;
+    const tramPos = Cesium.Cartesian3.fromDegrees(snapped.lon, snapped.lat, alt);
     const dist = Cesium.Cartesian3.distance(cameraPos, tramPos);
 
     let entry = _tramModels.get(v.id);
@@ -115,8 +207,8 @@ export function updateTramModels(viewer, vehicles) {
             }
             entry.model = model;
             entry.loading = false;
-            // Position immediately
-            computeTramModelMatrix(tramPos, v.bearing || 0, model.modelMatrix);
+            // Position and orient along track vector
+            computeTramModelMatrix(tramPos, snapped.bearing, model.modelMatrix);
             viewer.scene?.primitives?.add(model);
           }).catch((err) => {
             console.warn('[PID Tram 3D] Failed to load 3D tram model:', err);
@@ -129,7 +221,7 @@ export function updateTramModels(viewer, vehicles) {
 
       if (entry.model) {
         entry.model.show = true;
-        computeTramModelMatrix(tramPos, v.bearing || 0, entry.model.modelMatrix);
+        computeTramModelMatrix(tramPos, snapped.bearing, entry.model.modelMatrix);
       }
 
       // Hide the 2D billboard so it doesn't clash with the 3D model
@@ -201,7 +293,9 @@ export default {
   isTramModelManagerActive,
   getActive3DModelCount,
   computeTramModelMatrix,
+  snapTramToTrack,
   TRAM_MODEL_URL,
   MODEL_ENTER_DIST_M,
   MODEL_EXIT_DIST_M,
+  TRAM_HEADING_OFFSET_DEG,
 };

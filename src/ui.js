@@ -2311,10 +2311,12 @@ export class StyleManager {
     this._globalContextFlightsBtn = document.getElementById('global-context-flights-btn');
     this._globalContextMissionsBtn = document.getElementById('global-context-missions-btn');
     this._globalContextPidBtn = document.getElementById('global-context-pid-btn');
+    this._globalContextCdBtn = document.getElementById('global-context-cd-btn');
     this._contextModeStandby = document.getElementById('context-mode-standby');
     this._contextFlightsView = document.getElementById('context-flights-view');
     this._contextMissionsView = document.getElementById('context-missions-view');
     this._contextPidView = document.getElementById('context-pid-view');
+    this._contextCdView = document.getElementById('context-cd-view');
     this._contextMode = null;
     this._contextModeChanging = false;
     this._contextModeGeneration = 0;
@@ -2626,6 +2628,7 @@ export class StyleManager {
     this._initCctvPanel();
     this._initGlobalContextPanel();
     this._initPidContextPanel();
+    this._initCdContextPanel();
     this._initLocationBar();
     this._initShareButton();
     this._initClearSelectedLayersButton();
@@ -4605,7 +4608,7 @@ export class StyleManager {
   }
 
   _initGlobalContextPanel() {
-    const contextTabs = [this._globalContextFlightsBtn, this._globalContextMissionsBtn, this._globalContextPidBtn].filter(Boolean);
+    const contextTabs = [this._globalContextFlightsBtn, this._globalContextMissionsBtn, this._globalContextPidBtn, this._globalContextCdBtn].filter(Boolean);
     contextTabs.forEach((tab, index) => tab.addEventListener('keydown', (event) => {
       let nextIndex = null;
       if (event.key === 'ArrowRight') nextIndex = (index + 1) % contextTabs.length;
@@ -5283,8 +5286,10 @@ export class StyleManager {
     const flightsActive = this._contextMode === 'flights';
     const missionsActive = this._contextMode === 'space-missions';
     const pidActive = this._contextMode === 'pid';
+    const cdActive = this._contextMode === 'cd';
+    const anyActive = flightsActive || missionsActive || pidActive || cdActive;
     const panel = document.getElementById('global-context-panel');
-    panel?.classList.toggle('context-enabled', flightsActive || missionsActive || pidActive);
+    panel?.classList.toggle('context-enabled', anyActive);
     panel?.setAttribute('data-context-mode', this._contextMode || 'none');
     this._globalContextFlightsBtn?.classList.toggle('active', flightsActive);
     this._globalContextFlightsBtn?.setAttribute('aria-selected', String(flightsActive));
@@ -5292,13 +5297,17 @@ export class StyleManager {
     this._globalContextMissionsBtn?.setAttribute('aria-selected', String(missionsActive));
     this._globalContextPidBtn?.classList.toggle('active', pidActive);
     this._globalContextPidBtn?.setAttribute('aria-selected', String(pidActive));
+    this._globalContextCdBtn?.classList.toggle('active', cdActive);
+    this._globalContextCdBtn?.setAttribute('aria-selected', String(cdActive));
     if (this._globalContextFlightsBtn) this._globalContextFlightsBtn.tabIndex = flightsActive ? 0 : -1;
     if (this._globalContextMissionsBtn) this._globalContextMissionsBtn.tabIndex = missionsActive ? 0 : -1;
     if (this._globalContextPidBtn) this._globalContextPidBtn.tabIndex = pidActive ? 0 : -1;
-    if (this._contextModeStandby) this._contextModeStandby.hidden = flightsActive || missionsActive || pidActive;
+    if (this._globalContextCdBtn) this._globalContextCdBtn.tabIndex = cdActive ? 0 : -1;
+    if (this._contextModeStandby) this._contextModeStandby.hidden = anyActive;
     if (this._contextFlightsView) this._contextFlightsView.hidden = !flightsActive;
     if (this._contextMissionsView) this._contextMissionsView.hidden = !missionsActive;
     if (this._contextPidView) this._contextPidView.hidden = !pidActive;
+    if (this._contextCdView) this._contextCdView.hidden = !cdActive;
     this.cockpitView?.syncEntry();
     // Every _contextMode mutation funnels through here; the sync no-ops until
     // the transaction settles, so this is the activation/deactivation edge.
@@ -5339,6 +5348,44 @@ export class StyleManager {
         void this._runUserFacingContextAction(
           (notificationToken) => this._selectContextMode(null, { notificationToken }),
           'PID could not complete the requested transition; try again',
+        );
+      }
+    });
+  }
+
+  /** Wire České dráhy Context panel tabs and events */
+  _initCdContextPanel() {
+    this._globalContextCdBtn?.addEventListener('click', () => {
+      const nextMode = this._contextMode === 'cd' ? null : 'cd';
+      this._claimContextVisualAuthority();
+      void this._runUserFacingContextAction(
+        (notificationToken) => this._selectContextMode(
+          nextMode,
+          { notificationToken },
+        ),
+        'Vlaky ČD could not complete the requested transition; try again',
+      ).then((succeeded) => {
+        if (nextMode && shouldExpandGlobalContextPanel({
+          action: 'cd',
+          explicitUserAction: true,
+          succeeded: succeeded === true,
+        })) this.setPanelCollapsed('global-context-panel', false, { explicit: true });
+      });
+    });
+    window.addEventListener('gev:open-cd-context', () => {
+      if (this._contextMode !== 'cd') {
+        void this._runUserFacingContextAction(
+          (notificationToken) => this._selectContextMode('cd', { notificationToken }),
+          'Vlaky ČD could not complete the requested transition; try again',
+        );
+      }
+      this.setPanelCollapsed('global-context-panel', false, { explicit: true });
+    });
+    window.addEventListener('gev:close-cd-context', () => {
+      if (this._contextMode === 'cd') {
+        void this._runUserFacingContextAction(
+          (notificationToken) => this._selectContextMode(null, { notificationToken }),
+          'Vlaky ČD could not complete the requested transition; try again',
         );
       }
     });
@@ -6822,7 +6869,9 @@ export class StyleManager {
       this._cctvPanel.style.removeProperty('left');
       this._cctvPanel.style.removeProperty('z-index');
       this._cctvPanel.classList.remove('panel-draggable', 'panel-dragging');
-      stack.insertBefore(this._cctvPanel, globalContextPanel);
+      if (!globalContextPanel?.contains(this._cctvPanel)) {
+        globalContextPanel?.querySelector('.global-context-panel-inner')?.appendChild(this._cctvPanel);
+      }
       this._syncPanelCollapseButton(this._cctvPanel);
     }
     if (this._sliderPanel) {
@@ -7731,7 +7780,7 @@ export class StyleManager {
     const nextCollapsed = Boolean(collapsed);
     const wasAutoCollapsed = panelEl.classList.contains('layout-auto-collapsed');
     const leftOwnerPanel = this._leftPanelStack?.contains(panelEl) ? panelEl : null;
-    const rightOwnerPanel = panelId === 'radio-panel'
+    const rightOwnerPanel = (panelId === 'radio-panel' || panelId === 'cctv-panel')
       ? document.getElementById('global-context-panel')
       : (this._rightPanelStack?.contains(panelEl) ? panelEl : null);
     const priorLeftOwner = this._leftStackPreferredPanelId;
@@ -7772,7 +7821,7 @@ export class StyleManager {
         && this._contextRadioDock?.classList.contains('disclosure-open')) {
       this._setRadioDisclosure?.(false);
     }
-    if (!nextCollapsed && panelId === 'radio-panel'
+    if (!nextCollapsed && (panelId === 'radio-panel' || panelId === 'cctv-panel')
         && document.getElementById('global-context-panel')?.classList.contains('collapsed')) {
       this.setPanelCollapsed('global-context-panel', false, { restore, persist, syncShare });
     }
@@ -9390,6 +9439,13 @@ export class StyleManager {
         }
       }
     });
+
+    this._setActiveLocation('prague');
+    this._activePoiIndex = 0;
+    if (CITY_POIS.prague?.pois?.length) {
+      this._currentPoi = CITY_POIS.prague.pois[0];
+    }
+    this._updateLocationMiniStatus();
   }
 
   /**
@@ -9939,9 +9995,9 @@ export class StyleManager {
     });
 
     if (this._hudLayoutSelect) {
-      this._hudLayoutSelect.value = 'tactical';
+      this._hudLayoutSelect.value = 'minimal';
     }
-    this._setHudVariant('tactical');
+    this._setHudVariant('minimal');
     this.hud.setMode('on');
     this._updateHudButtonState();
 
